@@ -1,25 +1,22 @@
-import { cp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
+import { cp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { createBrowserBundle } from './browser-bundle.mjs';
 
 const root = new URL('../', import.meta.url);
 const output = new URL('dist/', root);
+const bundle = await createBrowserBundle();
+// Keep the generated application code synchronized with its small source modules.
+await writeFile(new URL('app.bundle.js', root), bundle);
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
-for (const item of ['index.html', 'styles.css', 'assets', 'src']) {
+for (const item of ['index.html', 'styles.css', 'assets', 'src', 'app.bundle.js']) {
   await cp(new URL(item, root), new URL(item, output), { recursive: true });
 }
+const vendor = new URL('vendor/blockly/', output);
+await mkdir(vendor, { recursive: true });
+for (const item of ['blockly_compressed.js', 'LICENSE', 'media']) {
+  await cp(new URL(`node_modules/blockly/${item}`, root), new URL(item, vendor), { recursive: true });
+}
+await cp(new URL('node_modules/blockly/msg/en.js', root), new URL('en.js', vendor));
+await cp(new URL('THIRD_PARTY_NOTICES.md', root), new URL('THIRD_PARTY_NOTICES.md', output));
 
-// Also provide a single-file release that can be opened without a server.
-const modules = ['parser', 'renderer', 'examples', 'app'];
-const script = (await Promise.all(modules.map(async name => {
-  const content = await readFile(new URL(`src/${name}.js`, root), 'utf8');
-  return content.replace(/^import .+;\n/gm, '').replace(/^export /gm, '');
-}))).join('\n').replace(/<\/script/gi, '<\\/script');
-const css = await readFile(new URL('styles.css', root), 'utf8');
-const icon = (await readFile(new URL('assets/favicon.svg', root))).toString('base64');
-const html = (await readFile(new URL('index.html', root), 'utf8'))
-  .replace('<link rel="stylesheet" href="./styles.css">', () => `<style>${css}</style>`)
-  .replace('<script type="module" src="./src/app.js"></script>', () => `<script type="module">${script}</script>`)
-  .replace('href="./assets/favicon.svg"', () => `href="data:image/svg+xml;base64,${icon}"`)
-  .replace('href="./"', 'href="#"');
-await writeFile(new URL('Structogram.html', output), html);
-console.log('Built static editor and standalone Structogram.html in dist/');
+console.log('Built the desktop editor and its local Blockly assets in dist/');

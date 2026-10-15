@@ -1,16 +1,19 @@
 import { parse } from './parser.js';
 import { render } from './renderer.js';
 import { examples, blank } from './examples.js';
+import { createBlockEditor } from './blocks.js';
 
 const $ = id => document.getElementById(id);
 const source = $('source'), stage = $('diagram-stage'), title = $('document-title');
 const storageKey = 'structogram.ads.workspace.v1';
+const desktop = window.structogramDesktop;
 const canvas = document.createElement('canvas');
 const context = canvas.getContext('2d');
 context.font = 'italic 18px "Times New Roman", Georgia, serif';
 let documentState = { ...examples[0], modified: false };
 let currentDiagram, valid = false, zoom = 1, fitMode = true, renderTimer, toastTimer, pendingReplacement;
 let storageAvailable = true;
+let visual = null, editorMode = 'blocks', lastBlockSource = '';
 
 try {
   const stored = JSON.parse(localStorage.getItem(storageKey));
@@ -29,6 +32,7 @@ function toast(message) {
 function persist() {
   documentState.source = source.value;
   documentState.title = title.value;
+  documentState.editorMode = editorMode;
   try {
     localStorage.setItem(storageKey, JSON.stringify(documentState));
     storageAvailable = true;
@@ -57,6 +61,7 @@ function updateLines() {
 }
 
 function updateCursor() {
+  if (editorMode === 'blocks') { $('cursor-position').textContent = 'Visual editing'; return; }
   const before = source.value.slice(0, source.selectionStart).split('\n');
   $('cursor-position').textContent = `Ln ${before.length}, Col ${before.at(-1).length + 1}`;
 }
@@ -83,6 +88,7 @@ function applyZoom() {
 function updatePreview() {
   clearTimeout(renderTimer);
   try {
+    if (editorMode === 'blocks' && visual?.error) throw visual.error;
     const routines = parse(source.value);
     currentDiagram = render(routines, { measure: text => context.measureText(text).width, title: title.value.trim() || 'Structogram' });
     stage.innerHTML = currentDiagram.svg;
@@ -98,16 +104,21 @@ function updatePreview() {
   } catch (error) {
     valid = false;
     stage.classList.add('is-stale');
-    $('parse-error').textContent = `Line ${error.line || 1}: ${error.message}`;
+    $('parse-error').textContent = `${error.line ? `Line ${error.line}` : 'Blocks'}: ${error.message}`;
     $('parse-error').hidden = false;
     $('diagram-status').textContent = 'Preview paused · fix the highlighted issue';
     exportEnabled(false);
   }
 }
 
-function documentChanged() {
+function documentChanged(fromBlocks = false) {
   documentState.modified = true;
   documentState.id = null;
+  if (fromBlocks !== true) {
+    lastBlockSource = '';
+    delete documentState.blockWorkspace;
+    delete documentState.blockSource;
+  }
   updateLines();
   persist();
   updateDocumentLabel();
@@ -124,10 +135,50 @@ function loadDocument(next) {
   title.value = next.title;
   source.scrollTop = source.scrollLeft = 0;
   fitMode = true;
+  lastBlockSource = '';
+  if (editorMode === 'blocks' && visual) {
+    try { visual.load(next.source); lastBlockSource = next.source; }
+    catch { editorMode = 'text'; setEditorMode('text'); }
+  }
   persist();
   updateLines();
   updateDocumentLabel();
   updatePreview();
+}
+
+function setEditorMode(mode) {
+  if (mode === 'blocks') {
+    if (!visual) { toast('The visual editor is unavailable. Reinstall the application.'); return false; }
+    try {
+      parse(source.value);
+      if (lastBlockSource !== source.value) {
+        visual.load(source.value, documentState.blockSource === source.value ? documentState.blockWorkspace : null);
+        lastBlockSource = source.value;
+      }
+    } catch (error) { toast(`Fix the text first: ${error.message}`); return false; }
+  } else if (editorMode === 'blocks' && visual) {
+    visual.flush();
+    if (visual.error) { toast(visual.error.message); return false; }
+  }
+  editorMode = mode;
+  $('blocks-panel').hidden = mode !== 'blocks';
+  $('text-panel').hidden = mode !== 'text';
+  for (const name of ['blocks', 'text']) {
+    $('mode-' + name).setAttribute('aria-selected', String(name === mode));
+    $('mode-' + name).tabIndex = name === mode ? 0 : -1;
+  }
+  $('editor-hint').textContent = mode === 'blocks' ? 'Click a diagram row to find its block' : 'Tab to indent · click a diagram row to edit';
+  updateCursor();
+  if (mode === 'blocks') requestAnimationFrame(() => visual.resize());
+  persist();
+  updatePreview();
+  return true;
+}
+
+function undoEditing(redo = false) {
+  if (document.activeElement?.classList.contains('blocklyHtmlInput')) document.execCommand(redo ? 'redo' : 'undo');
+  else if (editorMode === 'blocks') visual?.undo(redo);
+  else { source.focus(); document.execCommand(redo ? 'redo' : 'undo'); }
 }
 
 function replaceDocument(next) {
@@ -181,26 +232,37 @@ function insertConstruct(kind) {
   updateCursor();
 }
 
-function download(blob, extension) {
+async function download(blob, extension) {
+  const filename = (title.value.trim().replace(/[^\p{L}\p{N}_.-]+/gu, '-').replace(/^-+|-+$/g, '') || 'algorithm') + extension;
+  if (desktop) return desktop.saveFile({ name: filename, bytes: new Uint8Array(await blob.arrayBuffer()) });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = (title.value.trim().replace(/[^\p{L}\p{N}_.-]+/gu, '-').replace(/^-+|-+$/g, '') || 'algorithm') + extension;
+  anchor.download = filename;
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  return true;
 }
 
-function saveSource() {
-  download(new Blob([source.value], { type: 'text/plain;charset=utf-8' }), '.ads');
-  toast('Source file downloaded');
+async function saveSource() {
+  if (editorMode === 'blocks') {
+    visual?.flush();
+    if (visual?.error) { toast('Connect or remove loose blocks before saving source.'); return; }
+  }
+  try {
+    if (await download(new Blob([source.value], { type: 'text/plain;charset=utf-8' }), '.ads')) toast('Source file saved');
+  } catch { toast('Could not save the file. Try another location.'); }
 }
 
 async function exportDiagram() {
+  if (editorMode === 'blocks') visual?.flush();
+  updatePreview();
   if (!valid || !currentDiagram) return;
   const snapshot = currentDiagram;
   if ($('export-format').value === 'svg') {
-    download(new Blob([snapshot.svg], { type: 'image/svg+xml;charset=utf-8' }), '.svg');
-    toast('SVG downloaded');
+    try {
+      if (await download(new Blob([snapshot.svg], { type: 'image/svg+xml;charset=utf-8' }), '.svg')) toast('SVG saved');
+    } catch { toast('Could not save the SVG. Try another location.'); }
     return;
   }
   try {
@@ -218,8 +280,7 @@ async function exportDiagram() {
     painter.drawImage(img, 0, 0, output.width, output.height);
     const blob = await new Promise(resolve => output.toBlob(resolve, 'image/png'));
     if (!blob) throw new Error('Could not create the image.');
-    download(blob, '.png');
-    toast('PNG downloaded');
+    if (await download(blob, '.png')) toast('PNG saved');
   } catch { toast('PNG export failed. Try SVG, which preserves the full diagram.'); }
 }
 
@@ -241,7 +302,11 @@ for (const [symbol, meaning] of [[':=', 'Assignment'], ['→', 'Pointer field'],
   button.textContent = symbol;
   button.title = meaning;
   button.setAttribute('aria-label', `Insert ${meaning.toLowerCase()} (${symbol})`);
-  button.addEventListener('click', () => editText(source.selectionStart, source.selectionEnd, symbol));
+  button.addEventListener('pointerdown', event => event.preventDefault());
+  button.addEventListener('click', () => {
+    if (editorMode === 'blocks') { if (!visual?.insertSymbol(symbol)) toast('Select a block or click its text field first.'); }
+    else editText(source.selectionStart, source.selectionEnd, symbol);
+  });
   $('symbols').append(button);
 }
 
@@ -263,18 +328,34 @@ $('confirm-replace').addEventListener('click', () => { $('replace-dialog').close
 $('save-before-replace').addEventListener('click', saveSource);
 $('save-source').addEventListener('click', saveSource);
 $('export-diagram').addEventListener('click', exportDiagram);
-$('print-diagram').addEventListener('click', () => { if (valid) window.print(); });
-$('import-source').addEventListener('click', () => $('file-input').click());
+$('print-diagram').addEventListener('click', async () => {
+  if (editorMode === 'blocks') visual?.flush();
+  updatePreview();
+  if (!valid) return;
+  try { if (desktop) await desktop.print(); else window.print(); }
+  catch { toast('Could not open the print dialog.'); }
+});
+$('import-source').addEventListener('click', async () => {
+  if (!desktop) { $('file-input').click(); return; }
+  try {
+    const file = await desktop.openFile();
+    if (file) importSource(file.name, file.text);
+  } catch { toast('Could not open the file. Choose a source file smaller than 400 KB.'); }
+});
 $('file-input').addEventListener('change', async event => {
   const file = event.target.files[0];
   event.target.value = '';
   if (!file) return;
   if (file.size > 400_000) { toast('Please open a source file smaller than 400 KB.'); return; }
+  try { importSource(file.name, await file.text()); }
+  catch { toast('Could not read this source file.'); }
+});
+
+function importSource(name, text) {
   try {
-    const text = await file.text();
-    const filename = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
+    const filename = name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
     let next = { title: filename.slice(0, 100), source: text };
-    if (/\.json$/i.test(file.name)) {
+    if (/\.json$/i.test(name)) {
       const data = JSON.parse(text);
       if (typeof data.source !== 'string') throw new Error('Missing source text.');
       next = { title: typeof data.title === 'string' ? data.title.slice(0, 100) : filename, source: data.source };
@@ -282,7 +363,7 @@ $('file-input').addEventListener('change', async event => {
     if (next.source.length > 100_000) throw new Error('Too large.');
     replaceDocument(next);
   } catch { toast('Could not open this file. Use a text source file or JSON with a source field.'); }
-});
+}
 
 source.addEventListener('input', documentChanged);
 source.addEventListener('click', updateCursor);
@@ -313,6 +394,7 @@ stage.addEventListener('click', event => {
   const row = event.target.closest('[data-line]');
   if (!row) return;
   const lineNumber = Number(row.dataset.line);
+  if (editorMode === 'blocks') { visual?.selectLine(lineNumber); return; }
   const lines = source.value.split('\n');
   const start = lines.slice(0, lineNumber - 1).reduce((sum, line) => sum + line.length + 1, 0);
   source.focus();
@@ -326,16 +408,51 @@ $('zoom-in').addEventListener('click', () => changeZoom(.1));
 $('zoom-out').addEventListener('click', () => changeZoom(-.1));
 $('zoom-reset').addEventListener('click', () => { fitMode = false; zoom = 1; applyZoom(); });
 $('zoom-fit').addEventListener('click', () => { fitMode = true; applyZoom(); });
-new ResizeObserver(() => { if (fitMode) applyZoom(); }).observe($('preview-viewport'));
+new ResizeObserver(() => { if (fitMode) applyZoom(); if (editorMode === 'blocks') visual?.resize(); }).observe($('preview-viewport'));
+if (desktop) {
+  document.querySelector('.local-badge').lastChild.textContent = ' Saved on your Mac';
+  desktop.onMenuAction(action => {
+    if (action === 'undo' || action === 'redo') { undoEditing(action === 'redo'); return; }
+    const commands = { new: 'new-document', open: 'import-source', save: 'save-source', print: 'print-diagram', guide: 'open-guide' };
+    $(commands[action])?.click();
+  });
+}
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && document.body.classList.contains('nav-open')) { closeNavigation(); $('toggle-nav').focus(); }
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveSource(); }
+  if (!desktop && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveSource(); }
 });
 window.addEventListener('beforeprint', updatePreview);
 window.addEventListener('pagehide', persist);
 
 source.value = documentState.source;
 title.value = documentState.title;
+const initialMode = documentState.editorMode === 'text' ? 'text' : 'blocks';
+try {
+  visual = createBlockEditor($('block-workspace'), result => {
+    if (editorMode !== 'blocks') return;
+    documentState.blockWorkspace = result.state;
+    documentState.blockSource = source.value;
+    if (result.error) { documentState.modified = true; persist(); updatePreview(); return; }
+    if (result.changed) {
+      source.value = result.source;
+      lastBlockSource = result.source;
+      documentState.blockSource = result.source;
+      documentChanged(true);
+    } else persist();
+  });
+} catch (error) { toast(error.message); }
+$('mode-blocks').addEventListener('click', () => setEditorMode('blocks'));
+$('mode-text').addEventListener('click', () => setEditorMode('text'));
+$('undo-blocks').addEventListener('click', () => undoEditing(false));
+$('redo-blocks').addEventListener('click', () => undoEditing(true));
+for (const mode of ['blocks', 'text']) $('mode-' + mode).addEventListener('keydown', event => {
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    event.preventDefault();
+    const next = mode === 'blocks' ? 'text' : 'blocks';
+    if (setEditorMode(next)) $('mode-' + next).focus();
+  }
+});
+if (!setEditorMode(visual ? initialMode : 'text')) setEditorMode('text');
 updateLines();
 updateDocumentLabel();
 updatePreview();
