@@ -1,13 +1,37 @@
 {
   "name": "structogram-for-ads",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "private": true,
   "type": "module",
-  "description": "A local-first structogram editor using the conventions of the ELTE ADS lecture notes.",
+  "description": "An offline desktop structogram editor for the ELTE ADS lectures.",
+  "main": "desktop/main.cjs",
+  "author": "23sdd",
   "scripts": {
-    "start": "node scripts/serve.mjs",
+    "start": "node scripts/build.mjs && electron .",
+    "start:web": "node scripts/build.mjs && node scripts/serve.mjs",
     "build": "node scripts/build.mjs",
-    "test": "node --test"
+    "test": "node --test",
+    "package:mac": "npm run build && electron-builder --mac dmg --universal --publish never"
   },
-  "engines": { "node": ">=20" }
+  "engines": { "node": ">=22" },
+  "devDependencies": {
+    "electron": "44.7.2",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "hu.ads.structogram",
+    "productName": "Structogram ADS",
+    "artifactName": "Structogram-ADS-${version}-Mac.${ext}",
+    "directories": { "output": "release" },
+    "files": ["desktop/**", "dist/**", "package.json"],
+    "asar": true,
+    "mac": {
+      "category": "public.app-category.education",
+      "icon": "assets/app-icon.png",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "target": [{ "target": "dmg", "arch": ["universal"] }]
+    },
+    "dmg": { "title": "Install Structogram ADS" }
+  }
 }

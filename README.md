@@ -1,22 +1,40 @@
 # Structogram for ADS
 
-A browser editor for writing algorithms in the structure-diagram notation used in the ELTE Algorithms and Data Structures lectures. Type indented pseudocode on the left and see the diagram on the right. The goal is to write solutions in the same style your professor uses during lectures.
+A desktop application for writing algorithms in the structure-diagram notation used in the ELTE Algorithms and Data Structures lectures. It runs in its own macOS window, has native Open/Save and Print dialogs, and works offline. Type indented pseudocode on the left and see the diagram on the right.
 
 The diagram follows the lecture PDFs: rounded routine signatures, thin monochrome borders, left-hand loop rails, shallow diagonal selection marks, and `SKIP` for an empty branch. Control keywords guide the editor and are omitted from the rendered diagram.
 
 ![The pseudocode editor alongside an insertion-sort structogram](docs/editor-preview.png)
 
-## Run locally
+## Install on your Mac
 
-For the simplest setup, download the standalone **Structogram.html** release and double-click it. The complete editor runs in the browser without installation. Browser storage support for local files varies, so use **Save source** to keep a copy of important work.
+1. In GitHub **Actions → Build Mac application**, open a successful run and download **Structogram-ADS-Mac** under Artifacts. GitHub may require you to sign in to download build artifacts.
+2. Unzip the download and open **Structogram-ADS-1.1.0-Mac.dmg**.
+3. Drag **Structogram ADS** into **Applications** (Программы).
+4. Open **Structogram ADS** from Applications or Spotlight.
 
-Requires Node.js 20 or later. There are **no dependencies to install**.
+The universal installer supports both Apple Silicon and Intel Macs. It includes the application runtime; you do not need Safari, Chrome, Node.js, or a development server to use it. The app is built with Electron and packages the editor locally.
+
+This personal build is ad-hoc signed, not notarized with an Apple Developer account. macOS may require **System Settings → Privacy & Security → Open Anyway** after the first launch attempt. Do this only for the build downloaded from your own repository. Build artifacts are retained for 30 days; run the workflow again if a download has expired.
+
+## Develop or build the application
+
+Requires Node.js 22 or later:
 
 ```sh
+npm ci
 npm start
 ```
 
-Open the printed address, normally `http://localhost:4173`. Keep the server running while editing. Use `PORT=8080 npm start` to change the port. ES modules require an HTTP server; opening `index.html` directly from the filesystem is not supported.
+To produce the universal Mac installer, run on macOS:
+
+```sh
+npm run package:mac
+```
+
+The `.dmg` is written to `release/`. GitHub Actions also launches the packaged `.app` and verifies its native bridge, six examples, and live diagram before uploading the installer.
+
+The browser edition is retained as an optional fallback: `npm run start:web` serves it over HTTP. `Structogram.html` is a standalone HTML version; `index.html` also works from disk with `app.bundle.js` alongside it. **Code → Download ZIP** downloads source code, not the Mac installer.
 
 ## Use the editor
 
@@ -27,7 +45,9 @@ Open the printed address, normally `http://localhost:4173`. Keep the server runn
 - Export a self-contained SVG or a PNG. Print / PDF opens the browser print dialog and prints only the diagram. Large documents scale to fit one printed page; SVG preserves their original size.
 - **Save source** (Ctrl/Cmd+S) downloads an editable `.ads` text file. **Open file** accepts `.ads`, `.txt`, `.str`, or JSON containing `source` and an optional `title`.
 
-The current document is saved in browser local storage. This is one working document per browser origin, not cloud storage; download a source file before replacing work you want to keep. A replacement dialog helps prevent accidental loss. When local storage is unavailable, the editor shows a reminder to save a source file. There are no accounts, analytics, external fonts, or runtime network requests after the app's own files load.
+The desktop app saves the working document in its local application storage. Use **File → Save Source As…** to keep separate `.ads` files in folders you choose. Open/Save and Print use native macOS dialogs. There are no accounts, analytics, external fonts, automatic updates, or runtime network requests.
+
+Mac shortcuts: **⌘N** new algorithm, **⌘O** open source, **⌘S** save source, **⌘P** print/PDF. The browser fallback saves its own working document in browser storage, separate from the desktop app.
 
 ## Source notation
 
@@ -88,11 +108,11 @@ This is an independent learning tool. The renderer follows the diagram conventio
 ## Check and build
 
 ```sh
-npm test
 npm run build
+npm test
 ```
 
-Tests cover nested branches, malformed source, course examples, mathematical notation, wrapped text, source limits, and SVG escaping. The static production output is in `dist/`, including a self-contained `Structogram.html` for use without a server. All asset paths are relative, so the hosted version also works under a GitHub Pages project subdirectory.
+Tests cover nested branches, malformed source, course examples, mathematical notation, wrapped text, source limits, SVG escaping, and synchronization of the generated browser files. Edit the modules in `src/`, then run `npm run build` and commit both generated files (`app.bundle.js` and `Structogram.html`) along with your changes. The tests catch stale generated files. The static production output is also copied to `dist/`. All asset paths are relative, so the hosted version works under a GitHub Pages project subdirectory.
 
 ## Publish on GitHub Pages
 
@@ -111,5 +131,7 @@ The included workflow runs the tests, builds the files, and deploys to Pages. Pu
 | `src/renderer.js` | SVG geometry shared by preview and exports |
 | `src/app.js` | Editing, storage, file I/O, zoom, and export |
 | `src/examples.js` | Editable ADS examples |
+| `desktop/` | Desktop window, macOS menus, sandboxed preload and native file dialogs |
+| `app.bundle.js`, `Structogram.html` | Generated, ready-to-open files included in GitHub ZIPs |
 | `scripts/` | Dependency-free dev server and static build |
 | `tests/diagram.test.js` | Parser and export checks |

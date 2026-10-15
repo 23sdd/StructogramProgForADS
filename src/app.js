@@ -5,6 +5,7 @@ import { examples, blank } from './examples.js';
 const $ = id => document.getElementById(id);
 const source = $('source'), stage = $('diagram-stage'), title = $('document-title');
 const storageKey = 'structogram.ads.workspace.v1';
+const desktop = window.structogramDesktop;
 const canvas = document.createElement('canvas');
 const context = canvas.getContext('2d');
 context.font = 'italic 18px "Times New Roman", Georgia, serif';
@@ -181,26 +182,31 @@ function insertConstruct(kind) {
   updateCursor();
 }
 
-function download(blob, extension) {
+async function download(blob, extension) {
+  const filename = (title.value.trim().replace(/[^\p{L}\p{N}_.-]+/gu, '-').replace(/^-+|-+$/g, '') || 'algorithm') + extension;
+  if (desktop) return desktop.saveFile({ name: filename, bytes: new Uint8Array(await blob.arrayBuffer()) });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
-  anchor.download = (title.value.trim().replace(/[^\p{L}\p{N}_.-]+/gu, '-').replace(/^-+|-+$/g, '') || 'algorithm') + extension;
+  anchor.download = filename;
   anchor.click();
   setTimeout(() => URL.revokeObjectURL(url), 30_000);
+  return true;
 }
 
-function saveSource() {
-  download(new Blob([source.value], { type: 'text/plain;charset=utf-8' }), '.ads');
-  toast('Source file downloaded');
+async function saveSource() {
+  try {
+    if (await download(new Blob([source.value], { type: 'text/plain;charset=utf-8' }), '.ads')) toast('Source file saved');
+  } catch { toast('Could not save the file. Try another location.'); }
 }
 
 async function exportDiagram() {
   if (!valid || !currentDiagram) return;
   const snapshot = currentDiagram;
   if ($('export-format').value === 'svg') {
-    download(new Blob([snapshot.svg], { type: 'image/svg+xml;charset=utf-8' }), '.svg');
-    toast('SVG downloaded');
+    try {
+      if (await download(new Blob([snapshot.svg], { type: 'image/svg+xml;charset=utf-8' }), '.svg')) toast('SVG saved');
+    } catch { toast('Could not save the SVG. Try another location.'); }
     return;
   }
   try {
@@ -218,8 +224,7 @@ async function exportDiagram() {
     painter.drawImage(img, 0, 0, output.width, output.height);
     const blob = await new Promise(resolve => output.toBlob(resolve, 'image/png'));
     if (!blob) throw new Error('Could not create the image.');
-    download(blob, '.png');
-    toast('PNG downloaded');
+    if (await download(blob, '.png')) toast('PNG saved');
   } catch { toast('PNG export failed. Try SVG, which preserves the full diagram.'); }
 }
 
@@ -263,18 +268,32 @@ $('confirm-replace').addEventListener('click', () => { $('replace-dialog').close
 $('save-before-replace').addEventListener('click', saveSource);
 $('save-source').addEventListener('click', saveSource);
 $('export-diagram').addEventListener('click', exportDiagram);
-$('print-diagram').addEventListener('click', () => { if (valid) window.print(); });
-$('import-source').addEventListener('click', () => $('file-input').click());
+$('print-diagram').addEventListener('click', async () => {
+  if (!valid) return;
+  try { if (desktop) await desktop.print(); else window.print(); }
+  catch { toast('Could not open the print dialog.'); }
+});
+$('import-source').addEventListener('click', async () => {
+  if (!desktop) { $('file-input').click(); return; }
+  try {
+    const file = await desktop.openFile();
+    if (file) importSource(file.name, file.text);
+  } catch { toast('Could not open the file. Choose a source file smaller than 400 KB.'); }
+});
 $('file-input').addEventListener('change', async event => {
   const file = event.target.files[0];
   event.target.value = '';
   if (!file) return;
   if (file.size > 400_000) { toast('Please open a source file smaller than 400 KB.'); return; }
+  try { importSource(file.name, await file.text()); }
+  catch { toast('Could not read this source file.'); }
+});
+
+function importSource(name, text) {
   try {
-    const text = await file.text();
-    const filename = file.name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
+    const filename = name.replace(/\.[^.]+$/, '').replace(/[-_]/g, ' ');
     let next = { title: filename.slice(0, 100), source: text };
-    if (/\.json$/i.test(file.name)) {
+    if (/\.json$/i.test(name)) {
       const data = JSON.parse(text);
       if (typeof data.source !== 'string') throw new Error('Missing source text.');
       next = { title: typeof data.title === 'string' ? data.title.slice(0, 100) : filename, source: data.source };
@@ -282,7 +301,7 @@ $('file-input').addEventListener('change', async event => {
     if (next.source.length > 100_000) throw new Error('Too large.');
     replaceDocument(next);
   } catch { toast('Could not open this file. Use a text source file or JSON with a source field.'); }
-});
+}
 
 source.addEventListener('input', documentChanged);
 source.addEventListener('click', updateCursor);
@@ -327,9 +346,16 @@ $('zoom-out').addEventListener('click', () => changeZoom(-.1));
 $('zoom-reset').addEventListener('click', () => { fitMode = false; zoom = 1; applyZoom(); });
 $('zoom-fit').addEventListener('click', () => { fitMode = true; applyZoom(); });
 new ResizeObserver(() => { if (fitMode) applyZoom(); }).observe($('preview-viewport'));
+if (desktop) {
+  document.querySelector('.local-badge').lastChild.textContent = ' Saved on your Mac';
+  desktop.onMenuAction(action => {
+    const commands = { new: 'new-document', open: 'import-source', save: 'save-source', print: 'print-diagram', guide: 'open-guide' };
+    $(commands[action])?.click();
+  });
+}
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && document.body.classList.contains('nav-open')) { closeNavigation(); $('toggle-nav').focus(); }
-  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveSource(); }
+  if (!desktop && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveSource(); }
 });
 window.addEventListener('beforeprint', updatePreview);
 window.addEventListener('pagehide', persist);

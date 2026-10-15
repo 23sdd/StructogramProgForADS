@@ -5,7 +5,7 @@ import path from 'node:path';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const types = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml' };
-const allowed = new Set(['index.html', 'styles.css', 'assets/favicon.svg', 'src/app.js', 'src/parser.js', 'src/renderer.js', 'src/examples.js']);
+const allowed = new Set(['index.html', 'Structogram.html', 'app.bundle.js', 'styles.css', 'assets/favicon.svg', 'src/app.js', 'src/parser.js', 'src/renderer.js', 'src/examples.js']);
 const port = Number(process.env.PORT || 4173);
 http.createServer(async (request, response) => {
   try {
