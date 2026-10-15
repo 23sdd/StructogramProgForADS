@@ -1,6 +1,6 @@
 {
   "name": "structogram-for-ads",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "private": true,
   "type": "module",
   "description": "An offline desktop structogram editor for the ELTE ADS lectures.",
@@ -11,17 +11,19 @@
     "start:web": "node scripts/build.mjs && node scripts/serve.mjs",
     "build": "node scripts/build.mjs",
     "test": "node --test",
-    "package:mac": "npm run build && electron-builder --mac dmg --universal --publish never"
+    "package:mac": "npm run build && electron-builder --mac zip --x64 --arm64 --publish never",
+    "installer": "node scripts/create-installer.mjs"
   },
   "engines": { "node": ">=22" },
   "devDependencies": {
+    "blockly": "13.4.0",
     "electron": "44.7.2",
     "electron-builder": "26.15.3"
   },
   "build": {
     "appId": "hu.ads.structogram",
     "productName": "Structogram ADS",
-    "artifactName": "Structogram-ADS-${version}-Mac.${ext}",
+    "artifactName": "Structogram-ADS-${version}-${arch}.${ext}",
     "directories": { "output": "release" },
     "files": ["desktop/**", "dist/**", "package.json"],
     "asar": true,
@@ -30,8 +32,7 @@
       "icon": "assets/app-icon.png",
       "identity": "-",
       "hardenedRuntime": false,
-      "target": [{ "target": "dmg", "arch": ["universal"] }]
-    },
-    "dmg": { "title": "Install Structogram ADS" }
+      "target": [{ "target": "zip", "arch": ["x64", "arm64"] }]
+    }
   }
 }

@@ -326,6 +326,221 @@ postorder(t : Node*)
 const blank = { title: 'Untitled algorithm', source: 'algorithm(A : T[n])\n  SKIP' };
 
 
+/** Convert our course AST to Blockly's data format. No expression is executed. */
+function sourceToBlocks(source) {
+  const original = source.split(/\r?\n/);
+  function chain(nodes) {
+    let next;
+    for (const node of [...nodes].reverse()) {
+      let block;
+      if (node.type === 'statement') block = { type: 'ads_statement', fields: { TEXT: node.text } };
+      else if (node.type === 'loop') {
+        const isFor = /^\s*(for|foreach)\s/.test(original[node.line - 1]);
+        block = { type: isFor ? 'ads_for' : 'ads_while', fields: { CONDITION: node.text }, inputs: { BODY: { block: chain(node.body) } } };
+      } else if (node.type === 'if') {
+        block = { type: 'ads_if', fields: { CONDITION: node.text }, inputs: { YES: { block: chain(node.yes) }, NO: { block: chain(node.no) } } };
+      } else {
+        const cases = node.branches.map(branch => ({
+          type: 'ads_case', data: String(branch.line), fields: { CONDITION: branch.text }, inputs: { BODY: { block: chain(branch.body) } }
+        }));
+        block = { type: 'ads_select', inputs: { BRANCHES: { block: link(cases) } } };
+      }
+      block.data = String(node.line);
+      if (next) block.next = { block: next };
+      next = block;
+    }
+    return next;
+  }
+  function link(blocks) {
+    let next;
+    for (const block of [...blocks].reverse()) { if (next) block.next = { block: next }; next = block; }
+    return next;
+  }
+  return { blocks: { languageVersion: 0, blocks: parse(source).map((routine, index) => ({
+    type: 'ads_routine', data: String(routine.line), x: 35, y: 35 + index * 300,
+    fields: { SIGNATURE: routine.signature }, inputs: { BODY: { block: chain(routine.body) } }
+  })) } };
+}
+
+/** Generate the editable pseudocode, keeping a map from diagram rows to blocks. */
+function blocksToSource(state) {
+  const lines = [], lineMap = {};
+  let count = 0;
+  function field(block, name, fallback) {
+    const value = String(block.fields?.[name] ?? fallback).trim();
+    if (/[\r\n]/.test(value)) throw new Error('Write one statement or condition per block.');
+    return value || fallback;
+  }
+  function emit(text, depth, block) {
+    lines.push('  '.repeat(depth) + text);
+    if (block.id) lineMap[lines.length] = block.id;
+  }
+  function body(block, name, depth) {
+    const child = block.inputs?.[name]?.block;
+    if (child) sequence(child, depth);
+    else emit('SKIP', depth, block);
+  }
+  function sequence(first, depth) {
+    if (depth > 25) throw new Error('Use at most 24 nested blocks.');
+    for (let block = first; block; block = block.next?.block) {
+      if (++count > 1500) throw new Error('Use at most 1,500 blocks.');
+      switch (block.type) {
+        case 'ads_statement': emit(field(block, 'TEXT', 'SKIP'), depth, block); break;
+        case 'ads_for': case 'ads_while':
+          emit((block.type === 'ads_for' ? 'for ' : 'while ') + field(block, 'CONDITION', block.type === 'ads_for' ? 'i := 0 to n − 1' : 'condition'), depth, block);
+          body(block, 'BODY', depth + 1); break;
+        case 'ads_if':
+          emit('if ' + field(block, 'CONDITION', 'condition'), depth, block);
+          body(block, 'YES', depth + 1);
+          emit('else', depth, block);
+          body(block, 'NO', depth + 1); break;
+        case 'ads_select': {
+          emit('select', depth, block);
+          let branch = block.inputs?.BRANCHES?.block, branches = 0;
+          while (branch) {
+            if (branch.type !== 'ads_case') throw new Error('Only case blocks belong inside a selection.');
+            if (++branches > 12) throw new Error('Use at most 12 case branches.');
+            const condition = field(branch, 'CONDITION', 'condition');
+            emit(condition === 'otherwise' ? 'otherwise' : 'case ' + condition, depth + 1, branch);
+            body(branch, 'BODY', depth + 2);
+            branch = branch.next?.block;
+          }
+          if (branches < 2) throw new Error('Add at least two case blocks inside the selection.');
+          break;
+        }
+        default: throw new Error('Place case blocks inside a selection, and other blocks inside an algorithm.');
+      }
+    }
+  }
+  const top = state.blocks?.blocks ?? [];
+  if (!top.length) throw new Error('Add an Algorithm block to begin.');
+  for (const [index, routine] of top.entries()) {
+    if (routine.type !== 'ads_routine') throw new Error('Connect loose blocks inside an Algorithm block.');
+    if (index) lines.push('');
+    emit(field(routine, 'SIGNATURE', 'algorithm()'), 0, routine);
+    body(routine, 'BODY', 1);
+    if (routine.next?.block) throw new Error('Algorithms must be separate top-level blocks.');
+  }
+  return { source: lines.join('\n'), lineMap };
+}
+
+
+function defineAdsBlocks(B) {
+  const textField = value => new B.FieldTextInput(value, value => value.replace(/[\r\n]/g, ' '));
+  function statement(block, color) { block.setPreviousStatement(true, 'ADS'); block.setNextStatement(true, 'ADS'); block.setColour(color); }
+  B.Blocks.ads_routine = { init() {
+    this.appendDummyInput().appendField('algorithm').appendField(textField('algorithm()'), 'SIGNATURE');
+    this.appendStatementInput('BODY').setCheck('ADS').appendField('do');
+    this.setColour('#315c62'); this.setTooltip('Name the algorithm and place its statements inside.');
+  } };
+  B.Blocks.ads_statement = { init() {
+    this.appendDummyInput().appendField('statement').appendField(textField('SKIP'), 'TEXT');
+    statement(this, '#40755a'); this.setTooltip('Write an assignment, declaration, call, return, or SKIP.');
+  } };
+  B.Blocks.ads_if = { init() {
+    this.appendDummyInput().appendField('if').appendField(textField('condition'), 'CONDITION');
+    this.appendStatementInput('YES').setCheck('ADS').appendField('then');
+    this.appendStatementInput('NO').setCheck('ADS').appendField('else');
+    statement(this, '#9c7135'); this.setTooltip('Edit the condition; place statements in the then and else branches.');
+  } };
+  for (const [type, label, placeholder] of [['ads_while', 'while', 'condition'], ['ads_for', 'for', 'i := 0 to n − 1']]) {
+    B.Blocks[type] = { init() {
+      this.appendDummyInput().appendField(label).appendField(textField(placeholder), 'CONDITION');
+      this.appendStatementInput('BODY').setCheck('ADS').appendField('do');
+      statement(this, '#3c7d79'); this.setTooltip('Edit the loop condition or range, then add statements inside.');
+    } };
+  }
+  B.Blocks.ads_select = { init() {
+    this.appendDummyInput().appendField('selection');
+    this.appendStatementInput('BRANCHES').setCheck('CASE').appendField('cases');
+    statement(this, '#9c7135'); this.setTooltip('Place two or more case blocks here; use otherwise for a final default branch.');
+  } };
+  B.Blocks.ads_case = { init() {
+    this.appendDummyInput().appendField('case').appendField(textField('condition'), 'CONDITION');
+    this.appendStatementInput('BODY').setCheck('ADS').appendField('do');
+    this.setPreviousStatement(true, 'CASE'); this.setNextStatement(true, 'CASE'); this.setColour('#ac8450');
+    this.setTooltip('A branch of a selection. Write otherwise for the final default branch.');
+  } };
+}
+
+function createBlockEditor(element, onChange) {
+  const B = window.Blockly;
+  if (!B) throw new Error('The local block editor could not load. Reinstall the application.');
+  defineAdsBlocks(B);
+  const toolbox = { kind: 'categoryToolbox', contents: [
+    { kind: 'category', name: 'Algorithm', colour: '#315c62', contents: [{ kind: 'block', type: 'ads_routine' }] },
+    { kind: 'category', name: 'Statements', colour: '#40755a', contents: [{ kind: 'block', type: 'ads_statement' }] },
+    { kind: 'category', name: 'Conditions', colour: '#9c7135', contents: [{ kind: 'block', type: 'ads_if' }, { kind: 'block', type: 'ads_select', inputs: { BRANCHES: { block: { type: 'ads_case', fields: { CONDITION: 'condition' }, next: { block: { type: 'ads_case', fields: { CONDITION: 'otherwise' } } } } } } }, { kind: 'block', type: 'ads_case' }] },
+    { kind: 'category', name: 'Loops', colour: '#3c7d79', contents: [{ kind: 'block', type: 'ads_while' }, { kind: 'block', type: 'ads_for' }] }
+  ] };
+  const workspace = B.inject(element, {
+    toolbox, renderer: 'zelos', media: './vendor/blockly/media/', sounds: false,
+    trashcan: true, scrollbars: true, move: { scrollbars: true, drag: true, wheel: true },
+    zoom: { controls: true, wheel: false, startScale: .85, minScale: .3, maxScale: 1.6 },
+    grid: { spacing: 20, length: 2, colour: '#e2e8dd', snap: true }
+  });
+  let suspended = false, lineMap = {}, lastSource = '', lastError = null, timer;
+  function save() { return B.serialization.workspaces.save(workspace); }
+  function publish() {
+    clearTimeout(timer);
+    if (suspended) return;
+    try {
+      const generated = blocksToSource(save());
+      const changed = generated.source !== lastSource || lastError !== null;
+      if (changed) {
+        lineMap = generated.lineMap;
+        const seen = new Set();
+        for (const [line, id] of Object.entries(lineMap)) {
+          if (!seen.has(id)) { workspace.getBlockById(id).data = line; seen.add(id); }
+        }
+      }
+      lastSource = generated.source; lastError = null;
+      onChange({ source: generated.source, state: save(), changed });
+    } catch (error) { lastError = error; onChange({ error, state: save() }); }
+  }
+  workspace.addChangeListener(event => {
+    if (!event.isUiEvent && !suspended && event.type !== B.Events.FINISHED_LOADING) {
+      clearTimeout(timer); timer = setTimeout(publish, 80);
+    }
+  });
+  return {
+    workspace,
+    get error() { return lastError; },
+    load(source, savedState) {
+      const state = savedState || sourceToBlocks(source);
+      suspended = true; clearTimeout(timer); B.Events.disable();
+      try {
+        workspace.clear();
+        B.serialization.workspaces.load(state, workspace);
+        if (!savedState) workspace.cleanUp();
+        workspace.clearUndo();
+        lineMap = {};
+        for (const block of workspace.getAllBlocks(false)) if (block.data && !lineMap[Number(block.data)]) lineMap[Number(block.data)] = block.id;
+        try { lastSource = blocksToSource(save()).source; lastError = null; }
+        catch (error) { lastError = error; lastSource = ''; }
+      } finally { B.Events.enable(); suspended = false; }
+      if (lastError) onChange({ error: lastError, state: save() });
+    },
+    save,
+    flush: publish,
+    resize() { B.svgResize(workspace); },
+    undo(redo = false) { workspace.undo(redo); publish(); },
+    selectLine(line) { const block = workspace.getBlockById(lineMap[line]); if (block) { B.getFocusManager().focusNode(block); block.select(); workspace.centerOnBlock(block.id); } },
+    insertSymbol(symbol) {
+      const active = document.activeElement;
+      if (active?.classList.contains('blocklyHtmlInput')) {
+        active.setRangeText(symbol, active.selectionStart, active.selectionEnd, 'end');
+        active.dispatchEvent(new Event('input', { bubbles: true })); return true;
+      }
+      const block = B.getSelected();
+      const field = block?.getField('TEXT') || block?.getField('CONDITION') || block?.getField('SIGNATURE');
+      if (!field) return false;
+      field.setValue(field.getValue() + symbol); return true;
+    }
+  };
+}
+
+
 const $ = id => document.getElementById(id);
 const source = $('source'), stage = $('diagram-stage'), title = $('document-title');
 const storageKey = 'structogram.ads.workspace.v1';
@@ -336,6 +551,7 @@ context.font = 'italic 18px "Times New Roman", Georgia, serif';
 let documentState = { ...examples[0], modified: false };
 let currentDiagram, valid = false, zoom = 1, fitMode = true, renderTimer, toastTimer, pendingReplacement;
 let storageAvailable = true;
+let visual = null, editorMode = 'blocks', lastBlockSource = '';
 
 try {
   const stored = JSON.parse(localStorage.getItem(storageKey));
@@ -354,6 +570,7 @@ function toast(message) {
 function persist() {
   documentState.source = source.value;
   documentState.title = title.value;
+  documentState.editorMode = editorMode;
   try {
     localStorage.setItem(storageKey, JSON.stringify(documentState));
     storageAvailable = true;
@@ -382,6 +599,7 @@ function updateLines() {
 }
 
 function updateCursor() {
+  if (editorMode === 'blocks') { $('cursor-position').textContent = 'Visual editing'; return; }
   const before = source.value.slice(0, source.selectionStart).split('\n');
   $('cursor-position').textContent = `Ln ${before.length}, Col ${before.at(-1).length + 1}`;
 }
@@ -408,6 +626,7 @@ function applyZoom() {
 function updatePreview() {
   clearTimeout(renderTimer);
   try {
+    if (editorMode === 'blocks' && visual?.error) throw visual.error;
     const routines = parse(source.value);
     currentDiagram = render(routines, { measure: text => context.measureText(text).width, title: title.value.trim() || 'Structogram' });
     stage.innerHTML = currentDiagram.svg;
@@ -423,16 +642,21 @@ function updatePreview() {
   } catch (error) {
     valid = false;
     stage.classList.add('is-stale');
-    $('parse-error').textContent = `Line ${error.line || 1}: ${error.message}`;
+    $('parse-error').textContent = `${error.line ? `Line ${error.line}` : 'Blocks'}: ${error.message}`;
     $('parse-error').hidden = false;
     $('diagram-status').textContent = 'Preview paused · fix the highlighted issue';
     exportEnabled(false);
   }
 }
 
-function documentChanged() {
+function documentChanged(fromBlocks = false) {
   documentState.modified = true;
   documentState.id = null;
+  if (fromBlocks !== true) {
+    lastBlockSource = '';
+    delete documentState.blockWorkspace;
+    delete documentState.blockSource;
+  }
   updateLines();
   persist();
   updateDocumentLabel();
@@ -449,10 +673,50 @@ function loadDocument(next) {
   title.value = next.title;
   source.scrollTop = source.scrollLeft = 0;
   fitMode = true;
+  lastBlockSource = '';
+  if (editorMode === 'blocks' && visual) {
+    try { visual.load(next.source); lastBlockSource = next.source; }
+    catch { editorMode = 'text'; setEditorMode('text'); }
+  }
   persist();
   updateLines();
   updateDocumentLabel();
   updatePreview();
+}
+
+function setEditorMode(mode) {
+  if (mode === 'blocks') {
+    if (!visual) { toast('The visual editor is unavailable. Reinstall the application.'); return false; }
+    try {
+      parse(source.value);
+      if (lastBlockSource !== source.value) {
+        visual.load(source.value, documentState.blockSource === source.value ? documentState.blockWorkspace : null);
+        lastBlockSource = source.value;
+      }
+    } catch (error) { toast(`Fix the text first: ${error.message}`); return false; }
+  } else if (editorMode === 'blocks' && visual) {
+    visual.flush();
+    if (visual.error) { toast(visual.error.message); return false; }
+  }
+  editorMode = mode;
+  $('blocks-panel').hidden = mode !== 'blocks';
+  $('text-panel').hidden = mode !== 'text';
+  for (const name of ['blocks', 'text']) {
+    $('mode-' + name).setAttribute('aria-selected', String(name === mode));
+    $('mode-' + name).tabIndex = name === mode ? 0 : -1;
+  }
+  $('editor-hint').textContent = mode === 'blocks' ? 'Click a diagram row to find its block' : 'Tab to indent · click a diagram row to edit';
+  updateCursor();
+  if (mode === 'blocks') requestAnimationFrame(() => visual.resize());
+  persist();
+  updatePreview();
+  return true;
+}
+
+function undoEditing(redo = false) {
+  if (document.activeElement?.classList.contains('blocklyHtmlInput')) document.execCommand(redo ? 'redo' : 'undo');
+  else if (editorMode === 'blocks') visual?.undo(redo);
+  else { source.focus(); document.execCommand(redo ? 'redo' : 'undo'); }
 }
 
 function replaceDocument(next) {
@@ -519,12 +783,18 @@ async function download(blob, extension) {
 }
 
 async function saveSource() {
+  if (editorMode === 'blocks') {
+    visual?.flush();
+    if (visual?.error) { toast('Connect or remove loose blocks before saving source.'); return; }
+  }
   try {
     if (await download(new Blob([source.value], { type: 'text/plain;charset=utf-8' }), '.ads')) toast('Source file saved');
   } catch { toast('Could not save the file. Try another location.'); }
 }
 
 async function exportDiagram() {
+  if (editorMode === 'blocks') visual?.flush();
+  updatePreview();
   if (!valid || !currentDiagram) return;
   const snapshot = currentDiagram;
   if ($('export-format').value === 'svg') {
@@ -570,7 +840,11 @@ for (const [symbol, meaning] of [[':=', 'Assignment'], ['→', 'Pointer field'],
   button.textContent = symbol;
   button.title = meaning;
   button.setAttribute('aria-label', `Insert ${meaning.toLowerCase()} (${symbol})`);
-  button.addEventListener('click', () => editText(source.selectionStart, source.selectionEnd, symbol));
+  button.addEventListener('pointerdown', event => event.preventDefault());
+  button.addEventListener('click', () => {
+    if (editorMode === 'blocks') { if (!visual?.insertSymbol(symbol)) toast('Select a block or click its text field first.'); }
+    else editText(source.selectionStart, source.selectionEnd, symbol);
+  });
   $('symbols').append(button);
 }
 
@@ -593,6 +867,8 @@ $('save-before-replace').addEventListener('click', saveSource);
 $('save-source').addEventListener('click', saveSource);
 $('export-diagram').addEventListener('click', exportDiagram);
 $('print-diagram').addEventListener('click', async () => {
+  if (editorMode === 'blocks') visual?.flush();
+  updatePreview();
   if (!valid) return;
   try { if (desktop) await desktop.print(); else window.print(); }
   catch { toast('Could not open the print dialog.'); }
@@ -656,6 +932,7 @@ stage.addEventListener('click', event => {
   const row = event.target.closest('[data-line]');
   if (!row) return;
   const lineNumber = Number(row.dataset.line);
+  if (editorMode === 'blocks') { visual?.selectLine(lineNumber); return; }
   const lines = source.value.split('\n');
   const start = lines.slice(0, lineNumber - 1).reduce((sum, line) => sum + line.length + 1, 0);
   source.focus();
@@ -669,10 +946,11 @@ $('zoom-in').addEventListener('click', () => changeZoom(.1));
 $('zoom-out').addEventListener('click', () => changeZoom(-.1));
 $('zoom-reset').addEventListener('click', () => { fitMode = false; zoom = 1; applyZoom(); });
 $('zoom-fit').addEventListener('click', () => { fitMode = true; applyZoom(); });
-new ResizeObserver(() => { if (fitMode) applyZoom(); }).observe($('preview-viewport'));
+new ResizeObserver(() => { if (fitMode) applyZoom(); if (editorMode === 'blocks') visual?.resize(); }).observe($('preview-viewport'));
 if (desktop) {
   document.querySelector('.local-badge').lastChild.textContent = ' Saved on your Mac';
   desktop.onMenuAction(action => {
+    if (action === 'undo' || action === 'redo') { undoEditing(action === 'redo'); return; }
     const commands = { new: 'new-document', open: 'import-source', save: 'save-source', print: 'print-diagram', guide: 'open-guide' };
     $(commands[action])?.click();
   });
@@ -686,6 +964,33 @@ window.addEventListener('pagehide', persist);
 
 source.value = documentState.source;
 title.value = documentState.title;
+const initialMode = documentState.editorMode === 'text' ? 'text' : 'blocks';
+try {
+  visual = createBlockEditor($('block-workspace'), result => {
+    if (editorMode !== 'blocks') return;
+    documentState.blockWorkspace = result.state;
+    documentState.blockSource = source.value;
+    if (result.error) { documentState.modified = true; persist(); updatePreview(); return; }
+    if (result.changed) {
+      source.value = result.source;
+      lastBlockSource = result.source;
+      documentState.blockSource = result.source;
+      documentChanged(true);
+    } else persist();
+  });
+} catch (error) { toast(error.message); }
+$('mode-blocks').addEventListener('click', () => setEditorMode('blocks'));
+$('mode-text').addEventListener('click', () => setEditorMode('text'));
+$('undo-blocks').addEventListener('click', () => undoEditing(false));
+$('redo-blocks').addEventListener('click', () => undoEditing(true));
+for (const mode of ['blocks', 'text']) $('mode-' + mode).addEventListener('keydown', event => {
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    event.preventDefault();
+    const next = mode === 'blocks' ? 'text' : 'blocks';
+    if (setEditorMode(next)) $('mode-' + next).focus();
+  }
+});
+if (!setEditorMode(visual ? initialMode : 'text')) setEditorMode('text');
 updateLines();
 updateDocumentLabel();
 updatePreview();

@@ -1,17 +1,22 @@
 import { cp, mkdir, rm, writeFile } from 'node:fs/promises';
-import { createBrowserBundle, createStandalone } from './browser-bundle.mjs';
+import { createBrowserBundle } from './browser-bundle.mjs';
 
 const root = new URL('../', import.meta.url);
 const output = new URL('dist/', root);
 const bundle = await createBrowserBundle();
-const standalone = await createStandalone(bundle);
-// Track ready-to-open files so GitHub's Download ZIP needs no build step.
+// Keep the generated application code synchronized with its small source modules.
 await writeFile(new URL('app.bundle.js', root), bundle);
-await writeFile(new URL('Structogram.html', root), standalone);
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
-for (const item of ['index.html', 'styles.css', 'assets', 'src', 'app.bundle.js', 'Structogram.html']) {
+for (const item of ['index.html', 'styles.css', 'assets', 'src', 'app.bundle.js']) {
   await cp(new URL(item, root), new URL(item, output), { recursive: true });
 }
+const vendor = new URL('vendor/blockly/', output);
+await mkdir(vendor, { recursive: true });
+for (const item of ['blockly_compressed.js', 'LICENSE', 'media']) {
+  await cp(new URL(`node_modules/blockly/${item}`, root), new URL(item, vendor), { recursive: true });
+}
+await cp(new URL('node_modules/blockly/msg/en.js', root), new URL('en.js', vendor));
+await cp(new URL('THIRD_PARTY_NOTICES.md', root), new URL('THIRD_PARTY_NOTICES.md', output));
 
-console.log('Updated ready-to-open files and built static editor in dist/');
+console.log('Built the desktop editor and its local Blockly assets in dist/');

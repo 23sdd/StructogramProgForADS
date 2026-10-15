@@ -6,7 +6,7 @@ contextBridge.exposeInMainWorld('structogramDesktop', {
   print: () => ipcRenderer.invoke('document:print'),
   onMenuAction: callback => {
     ipcRenderer.on('menu:action', (_event, action) => {
-      if (['new', 'open', 'save', 'print', 'guide'].includes(action)) callback(action);
+      if (['new', 'open', 'save', 'print', 'guide', 'undo', 'redo'].includes(action)) callback(action);
     });
   }
 });

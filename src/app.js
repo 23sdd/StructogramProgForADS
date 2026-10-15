@@ -1,6 +1,7 @@
 import { parse } from './parser.js';
 import { render } from './renderer.js';
 import { examples, blank } from './examples.js';
+import { createBlockEditor } from './blocks.js';
 
 const $ = id => document.getElementById(id);
 const source = $('source'), stage = $('diagram-stage'), title = $('document-title');
@@ -12,6 +13,7 @@ context.font = 'italic 18px "Times New Roman", Georgia, serif';
 let documentState = { ...examples[0], modified: false };
 let currentDiagram, valid = false, zoom = 1, fitMode = true, renderTimer, toastTimer, pendingReplacement;
 let storageAvailable = true;
+let visual = null, editorMode = 'blocks', lastBlockSource = '';
 
 try {
   const stored = JSON.parse(localStorage.getItem(storageKey));
@@ -30,6 +32,7 @@ function toast(message) {
 function persist() {
   documentState.source = source.value;
   documentState.title = title.value;
+  documentState.editorMode = editorMode;
   try {
     localStorage.setItem(storageKey, JSON.stringify(documentState));
     storageAvailable = true;
@@ -58,6 +61,7 @@ function updateLines() {
 }
 
 function updateCursor() {
+  if (editorMode === 'blocks') { $('cursor-position').textContent = 'Visual editing'; return; }
   const before = source.value.slice(0, source.selectionStart).split('\n');
   $('cursor-position').textContent = `Ln ${before.length}, Col ${before.at(-1).length + 1}`;
 }
@@ -84,6 +88,7 @@ function applyZoom() {
 function updatePreview() {
   clearTimeout(renderTimer);
   try {
+    if (editorMode === 'blocks' && visual?.error) throw visual.error;
     const routines = parse(source.value);
     currentDiagram = render(routines, { measure: text => context.measureText(text).width, title: title.value.trim() || 'Structogram' });
     stage.innerHTML = currentDiagram.svg;
@@ -99,16 +104,21 @@ function updatePreview() {
   } catch (error) {
     valid = false;
     stage.classList.add('is-stale');
-    $('parse-error').textContent = `Line ${error.line || 1}: ${error.message}`;
+    $('parse-error').textContent = `${error.line ? `Line ${error.line}` : 'Blocks'}: ${error.message}`;
     $('parse-error').hidden = false;
     $('diagram-status').textContent = 'Preview paused · fix the highlighted issue';
     exportEnabled(false);
   }
 }
 
-function documentChanged() {
+function documentChanged(fromBlocks = false) {
   documentState.modified = true;
   documentState.id = null;
+  if (fromBlocks !== true) {
+    lastBlockSource = '';
+    delete documentState.blockWorkspace;
+    delete documentState.blockSource;
+  }
   updateLines();
   persist();
   updateDocumentLabel();
@@ -125,10 +135,50 @@ function loadDocument(next) {
   title.value = next.title;
   source.scrollTop = source.scrollLeft = 0;
   fitMode = true;
+  lastBlockSource = '';
+  if (editorMode === 'blocks' && visual) {
+    try { visual.load(next.source); lastBlockSource = next.source; }
+    catch { editorMode = 'text'; setEditorMode('text'); }
+  }
   persist();
   updateLines();
   updateDocumentLabel();
   updatePreview();
+}
+
+function setEditorMode(mode) {
+  if (mode === 'blocks') {
+    if (!visual) { toast('The visual editor is unavailable. Reinstall the application.'); return false; }
+    try {
+      parse(source.value);
+      if (lastBlockSource !== source.value) {
+        visual.load(source.value, documentState.blockSource === source.value ? documentState.blockWorkspace : null);
+        lastBlockSource = source.value;
+      }
+    } catch (error) { toast(`Fix the text first: ${error.message}`); return false; }
+  } else if (editorMode === 'blocks' && visual) {
+    visual.flush();
+    if (visual.error) { toast(visual.error.message); return false; }
+  }
+  editorMode = mode;
+  $('blocks-panel').hidden = mode !== 'blocks';
+  $('text-panel').hidden = mode !== 'text';
+  for (const name of ['blocks', 'text']) {
+    $('mode-' + name).setAttribute('aria-selected', String(name === mode));
+    $('mode-' + name).tabIndex = name === mode ? 0 : -1;
+  }
+  $('editor-hint').textContent = mode === 'blocks' ? 'Click a diagram row to find its block' : 'Tab to indent · click a diagram row to edit';
+  updateCursor();
+  if (mode === 'blocks') requestAnimationFrame(() => visual.resize());
+  persist();
+  updatePreview();
+  return true;
+}
+
+function undoEditing(redo = false) {
+  if (document.activeElement?.classList.contains('blocklyHtmlInput')) document.execCommand(redo ? 'redo' : 'undo');
+  else if (editorMode === 'blocks') visual?.undo(redo);
+  else { source.focus(); document.execCommand(redo ? 'redo' : 'undo'); }
 }
 
 function replaceDocument(next) {
@@ -195,12 +245,18 @@ async function download(blob, extension) {
 }
 
 async function saveSource() {
+  if (editorMode === 'blocks') {
+    visual?.flush();
+    if (visual?.error) { toast('Connect or remove loose blocks before saving source.'); return; }
+  }
   try {
     if (await download(new Blob([source.value], { type: 'text/plain;charset=utf-8' }), '.ads')) toast('Source file saved');
   } catch { toast('Could not save the file. Try another location.'); }
 }
 
 async function exportDiagram() {
+  if (editorMode === 'blocks') visual?.flush();
+  updatePreview();
   if (!valid || !currentDiagram) return;
   const snapshot = currentDiagram;
   if ($('export-format').value === 'svg') {
@@ -246,7 +302,11 @@ for (const [symbol, meaning] of [[':=', 'Assignment'], ['→', 'Pointer field'],
   button.textContent = symbol;
   button.title = meaning;
   button.setAttribute('aria-label', `Insert ${meaning.toLowerCase()} (${symbol})`);
-  button.addEventListener('click', () => editText(source.selectionStart, source.selectionEnd, symbol));
+  button.addEventListener('pointerdown', event => event.preventDefault());
+  button.addEventListener('click', () => {
+    if (editorMode === 'blocks') { if (!visual?.insertSymbol(symbol)) toast('Select a block or click its text field first.'); }
+    else editText(source.selectionStart, source.selectionEnd, symbol);
+  });
   $('symbols').append(button);
 }
 
@@ -269,6 +329,8 @@ $('save-before-replace').addEventListener('click', saveSource);
 $('save-source').addEventListener('click', saveSource);
 $('export-diagram').addEventListener('click', exportDiagram);
 $('print-diagram').addEventListener('click', async () => {
+  if (editorMode === 'blocks') visual?.flush();
+  updatePreview();
   if (!valid) return;
   try { if (desktop) await desktop.print(); else window.print(); }
   catch { toast('Could not open the print dialog.'); }
@@ -332,6 +394,7 @@ stage.addEventListener('click', event => {
   const row = event.target.closest('[data-line]');
   if (!row) return;
   const lineNumber = Number(row.dataset.line);
+  if (editorMode === 'blocks') { visual?.selectLine(lineNumber); return; }
   const lines = source.value.split('\n');
   const start = lines.slice(0, lineNumber - 1).reduce((sum, line) => sum + line.length + 1, 0);
   source.focus();
@@ -345,10 +408,11 @@ $('zoom-in').addEventListener('click', () => changeZoom(.1));
 $('zoom-out').addEventListener('click', () => changeZoom(-.1));
 $('zoom-reset').addEventListener('click', () => { fitMode = false; zoom = 1; applyZoom(); });
 $('zoom-fit').addEventListener('click', () => { fitMode = true; applyZoom(); });
-new ResizeObserver(() => { if (fitMode) applyZoom(); }).observe($('preview-viewport'));
+new ResizeObserver(() => { if (fitMode) applyZoom(); if (editorMode === 'blocks') visual?.resize(); }).observe($('preview-viewport'));
 if (desktop) {
   document.querySelector('.local-badge').lastChild.textContent = ' Saved on your Mac';
   desktop.onMenuAction(action => {
+    if (action === 'undo' || action === 'redo') { undoEditing(action === 'redo'); return; }
     const commands = { new: 'new-document', open: 'import-source', save: 'save-source', print: 'print-diagram', guide: 'open-guide' };
     $(commands[action])?.click();
   });
@@ -362,6 +426,33 @@ window.addEventListener('pagehide', persist);
 
 source.value = documentState.source;
 title.value = documentState.title;
+const initialMode = documentState.editorMode === 'text' ? 'text' : 'blocks';
+try {
+  visual = createBlockEditor($('block-workspace'), result => {
+    if (editorMode !== 'blocks') return;
+    documentState.blockWorkspace = result.state;
+    documentState.blockSource = source.value;
+    if (result.error) { documentState.modified = true; persist(); updatePreview(); return; }
+    if (result.changed) {
+      source.value = result.source;
+      lastBlockSource = result.source;
+      documentState.blockSource = result.source;
+      documentChanged(true);
+    } else persist();
+  });
+} catch (error) { toast(error.message); }
+$('mode-blocks').addEventListener('click', () => setEditorMode('blocks'));
+$('mode-text').addEventListener('click', () => setEditorMode('text'));
+$('undo-blocks').addEventListener('click', () => undoEditing(false));
+$('redo-blocks').addEventListener('click', () => undoEditing(true));
+for (const mode of ['blocks', 'text']) $('mode-' + mode).addEventListener('keydown', event => {
+  if (event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    event.preventDefault();
+    const next = mode === 'blocks' ? 'text' : 'blocks';
+    if (setEditorMode(next)) $('mode-' + next).focus();
+  }
+});
+if (!setEditorMode(visual ? initialMode : 'text')) setEditorMode('text');
 updateLines();
 updateDocumentLabel();
 updatePreview();

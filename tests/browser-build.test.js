@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { createBrowserBundle, createStandalone } from '../scripts/browser-bundle.mjs';
+import { createBrowserBundle } from '../scripts/browser-bundle.mjs';
 
 const root = new URL('../', import.meta.url);
 
@@ -14,10 +14,8 @@ test('the downloaded index uses a classic script with no module imports', async 
   assert.equal(bundle, await createBrowserBundle(), 'Run npm run build to update app.bundle.js.');
 });
 
-test('the standalone download is current and has no external script or stylesheet', async () => {
-  const html = await readFile(new URL('Structogram.html', root), 'utf8');
-  assert.equal(html, await createStandalone(await createBrowserBundle()), 'Run npm run build to update Structogram.html.');
-  assert.doesNotMatch(html, /<script[^>]*\bsrc=/);
-  assert.doesNotMatch(html, /type="module"|rel="stylesheet"/);
-  assert.match(html, /DOMContentLoaded/);
+test('Blockly is served locally without an algorithm-execution generator', async () => {
+  const html = await readFile(new URL('index.html', root), 'utf8');
+  assert.match(html, /src="\.\/vendor\/blockly\/blockly_compressed.js"/);
+  assert.doesNotMatch(html, /src="https?:|javascript_compressed|eval\(/);
 });

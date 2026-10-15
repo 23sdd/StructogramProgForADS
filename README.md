@@ -1,53 +1,45 @@
-# Structogram for ADS
+# Structogram ADS
 
-A desktop application for writing algorithms in the structure-diagram notation used in the ELTE Algorithms and Data Structures lectures. It runs in its own macOS window, has native Open/Save and Print dialogs, and works offline. Type indented pseudocode on the left and see the diagram on the right.
+A desktop editor for the structure diagrams used in the ELTE Algorithms and Data Structures lectures. Edit one algorithm in two linked modes:
 
-The diagram follows the lecture PDFs: rounded routine signatures, thin monochrome borders, left-hand loop rails, shallow diagonal selection marks, and `SKIP` for an empty branch. Control keywords guide the editor and are omitted from the rendered diagram.
+- **Blocks:** drag Statement, If, While, For, and Selection blocks into an Algorithm block. Write operators and conditions directly in their fields. Nest blocks by connecting them inside a body or branch.
+- **Text:** write indented pseudocode. Switching to Blocks preserves the algorithm; changing a visual block updates both the text and the lecture-style diagram.
 
-![The pseudocode editor alongside an insertion-sort structogram](docs/editor-preview.png)
+The diagram follows the uploaded course PDFs: rounded routine signatures, loop rails, thin monochrome borders, diagonal selection marks, and `SKIP` for an empty branch. Pseudocode is treated as text and structure; it is never executed.
 
-## Install on your Mac
+![Visual blocks and the lecture-style diagram](docs/editor-preview.png)
 
-1. In GitHub **Actions → Build Mac application**, open a successful run and download **Structogram-ADS-Mac** under Artifacts. GitHub may require you to sign in to download build artifacts.
-2. Unzip the download and open **Structogram-ADS-1.1.0-Mac.dmg**.
-3. Drag **Structogram ADS** into **Applications** (Программы).
-4. Open **Structogram ADS** from Applications or Spotlight.
+## Download, install, and launch
 
-The universal installer supports both Apple Silicon and Intel Macs. It includes the application runtime; you do not need Safari, Chrome, Node.js, or a development server to use it. The app is built with Electron and packages the editor locally.
+The supported installation method is **one ZIP containing `Installation.command`**. No DMG, browser file, Node.js installation, Homebrew, or administrator password is required.
 
-This personal build is ad-hoc signed, not notarized with an Apple Developer account. macOS may require **System Settings → Privacy & Security → Open Anyway** after the first launch attempt. Do this only for the build downloaded from your own repository. Build artifacts are retained for 30 days; run the workflow again if a download has expired.
-
-## Develop or build the application
-
-Requires Node.js 22 or later:
+1. In [Releases](https://github.com/23sdd/StructogramProgForADS/releases), download **Structogram-Installer-1.2.0.zip** from the chosen version.
+2. Extract the ZIP and open the **Structogram Installer** folder.
+3. Double-click **Installation.command**, or open Terminal in that folder and run:
 
 ```sh
-npm ci
-npm start
+bash ./Installation.command
 ```
 
-To produce the universal Mac installer, run on macOS:
+The script detects Intel or Apple Silicon (including Terminal running under Rosetta), downloads only the matching application, checks its embedded SHA-256, verifies the app's ad-hoc signature, installs into **~/Applications/Structogram ADS.app**, and opens it. It does not execute downloaded source code or install development tools. Initial installation needs internet and downloads the Electron runtime as part of the app.
 
-```sh
-npm run package:mac
-```
+Run the same script again to open the installed copy without downloading. The installer is pinned to a particular release and never silently switches to newer code. To update, quit the app and run the installer from the new release. Working documents are stored separately from the installed app.
 
-The `.dmg` is written to `release/`. GitHub Actions also launches the packaged `.app` and verifies its native bridge, six examples, and live diagram before uploading the installer.
+Keep `Installation.command` executable when copying it; the distributed ZIP preserves this permission. Running it with `bash` also works if another download tool removes that bit. The personal build is ad-hoc signed, not Apple-notarized: macOS may show a first-launch prompt in **System Settings → Privacy & Security**. The script does not disable Gatekeeper or remove quarantine attributes.
 
-The browser edition is retained as an optional fallback: `npm run start:web` serves it over HTTP. `Structogram.html` is a standalone HTML version; `index.html` also works from disk with `app.bundle.js` alongside it. **Code → Download ZIP** downloads source code, not the Mac installer.
+**Code → Download ZIP** downloads development sources, not the ready-to-run installer. The architecture ZIP assets in each release are application payloads used by the script; the installer ZIP is the only supported end-user download.
 
-## Use the editor
+## Use the two editing modes
 
-- Start a new algorithm or load one of six examples from the sidebar. On a phone, open the sidebar with the menu button.
-- Write a routine signature without indentation, then indent its body. Use Tab, Shift+Tab, and automatic indentation after Enter.
-- Add statements, if/else, while, for, or multiway selections with the insertion buttons. They insert after the current line, or replace a blank or `SKIP` row.
-- Insert course symbols from the symbol bar. Click a diagram row to select its source line.
-- Export a self-contained SVG or a PNG. Print / PDF opens the browser print dialog and prints only the diagram. Large documents scale to fit one printed page; SVG preserves their original size.
-- **Save source** (Ctrl/Cmd+S) downloads an editable `.ads` text file. **Open file** accepts `.ads`, `.txt`, `.str`, or JSON containing `source` and an optional `title`.
+**Blocks** opens by default. Select a category on the left, drag out a block, and click a text field to edit it. The Algorithm block holds the routine signature and body. Statement blocks accept assignments, declarations, procedure calls, `return`, comments, and `SKIP`. If blocks have editable conditions plus then/else bodies. While and For blocks have editable conditions or iteration ranges.
 
-The desktop app saves the working document in its local application storage. Use **File → Save Source As…** to keep separate `.ads` files in folders you choose. Open/Save and Print use native macOS dialogs. There are no accounts, analytics, external fonts, automatic updates, or runtime network requests.
+Selections accept connected Case blocks. Add at least two, write their guards, and use `otherwise` for an optional final default branch. Case blocks connect only inside a Selection; ordinary statements connect inside routine, branch, or loop bodies. Empty bodies generate `SKIP` automatically. Loose blocks must be connected or removed before exporting or switching to Text, so statements are not silently dropped.
 
-Mac shortcuts: **⌘N** new algorithm, **⌘O** open source, **⌘S** save source, **⌘P** print/PDF. The browser fallback saves its own working document in browser storage, separate from the desktop app.
+The **Text** tab exposes the same pseudocode. It supports Tab/Shift+Tab, automatic indentation, mathematical symbols, and multiple routines. Fix malformed text before returning to Blocks; the editor keeps the text and error visible. Changing modes alone does not rewrite your original formatting. A subsequent block edit generates consistently indented text and explicit `SKIP` branches.
+
+Use the visual Undo/Redo buttons or Mac **⌘Z / ⇧⌘Z**. Click a diagram row to find its matching block or text line. Save `.ads` source files with **⌘S**, open them with **⌘O**, and print or save PDF with **⌘P**. SVG and PNG exports use the same renderer as the preview.
+
+The current document, selected mode, and visual layout are saved locally. Separate `.ads` files contain editable pseudocode; reopening them reconstructs their blocks. No accounts, analytics, external fonts, CDN, automatic updates, or runtime network requests are required by the editor. The browser edition is only a development/QA surface.
 
 ## Source notation
 
@@ -61,77 +53,57 @@ search(t : Node*; k : T) : Node*
   return t
 ```
 
-Supported constructs:
+Use consistent indentation within each block (two spaces recommended). No closing `end` keywords are needed. Empty bodies require `SKIP` in Text mode; an omitted `else` becomes an implicit `SKIP`. Conditions are not evaluated and the algorithm's mathematical correctness is not checked.
 
-```text
-example(A : T[n])
-  // A comment is a separate diagram row
-  x := 0
-  for i := 0 to n − 1
-    x := x + A[i]
-  for u ∈ G.V
-    visit(u)
-  if x < 0
-    return −1
-  else if x = 0
-    return 0
-  else
-    return 1
+The preview converts `->`, `!=`, `<>`, `<=`, `>=`, `&&`, `||`, `!`, and `NULL`/`null` into the course's mathematical symbols. It preserves `:=` for assignment and `=` for equality. Source files retain the text as typed until a visual edit regenerates the document. Comments beginning with `//` remain literal text.
 
-choose(x : T)
-  select
-    case x < 0
-      negative(x)
-    case x = 0
-      zero(x)
-    otherwise
-      positive(x)
+Malformed input pauses the preview, dims the previous diagram, and disables export/printing. Limits are 100,000 source characters, 1,500 non-empty lines, 24 nested levels, and 12 branches in a selection.
+
+## Open-source components and project licensing
+
+Blockly is Apache-2.0, Electron and Node.js use MIT licenses with upstream notices, and Chromium has BSD-style and third-party notices. All runtime assets are bundled locally. No JavaScript/Python execution generator is used for the algorithm blocks.
+
+**No license has been added to this project's own code**, as requested by the owner. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for component attribution and bundled licenses. Neither a license nor a checksum establishes that code is harmless; review the source and the pinned release you choose to install.
+
+## Development and checks
+
+Developers need Node.js 22 or later:
+
+```sh
+npm ci
+npm run build
+npm test
+npm start
 ```
 
-Use consistent indentation in each block (two spaces recommended; tabs alone are accepted as two spaces). No closing `end` keywords are needed. A block must contain a statement; use `SKIP` for an empty body. Omitting `else` generates an implicit `SKIP`. Multiple routines can share a document. `elif` is an alias for `else if`; `foreach` is an alias for collection iteration. Conditions and expressions are text: the editor draws their structure and does not execute or verify the algorithm. Case guards should be mutually exclusive or include their intended preconditions.
+`npm start` opens the desktop application. `npm run start:web` serves the same local editor for browser QA. Edit the small modules in `src/`, rebuild, and commit the updated `app.bundle.js` with source changes. The build copies Blockly, its media, English messages, and its license into `dist/vendor/blockly/` without a CDN.
 
-The preview converts `->`, `!=`, `<>`, `<=`, `>=`, `&&`, `||`, `!`, and `NULL`/`null` to their mathematical symbols. It preserves `:=` for assignment and `=` for equality. Comments are not converted. Source files always keep the text as typed.
+The tests cover actual Blockly round trips for every course example, preserved nested branches, field editing, malformed text, SVG escaping, installer architecture selection, checksum failure without replacing an installed app, cached launches, paths containing spaces, and metadata validation.
 
-An invalid edit shows its source line and pauses the preview. The previous valid drawing is dimmed, and image export and printing are disabled until the issue is fixed. Limits are 100,000 characters, 1,500 non-empty lines, 24 levels of nesting, and 12 branches in a multiway selection.
+On macOS, `npm run package:mac` creates separate application ZIPs for Intel and Apple Silicon. The GitHub workflow then creates a small installer ZIP with the exact release URLs and SHA-256 values embedded, installs through that script into a temporary folder, and launches the installed app to verify text editing, Blockly editing, and the live diagram before publishing the release assets. Same-repository pull requests create preview releases; fork pull requests cannot publish releases with this workflow. Build archives and scripts contain the runtime's upstream license notices.
+
+The installer also supports `--verify-only` for install/integrity checks without opening a window. `STRUCTOGRAM_PAYLOAD_CACHE` can point to a folder containing the exact payload ZIPs for offline setup; checksums are still verified. `STRUCTOGRAM_INSTALL_ROOT` selects a different user-writable installation folder. CI uses both options to test the actual script without requiring administrator rights.
 
 ## Course references
 
-The uploaded documents are references for notation, not application instructions. Original PDFs and exam materials are not redistributed in this repository.
+The uploaded documents are notation references, not application instructions. Original PDFs and exam materials are not redistributed:
 
-- Tibor Ásványi, *Algorithms and Data Structures I — Lecture Notes*, April 21, 2026: notation pp. 4–5; insertion sort p. 20; binary-search-tree diagrams p. 54.
-- *Algorithms and Data Structures II — Graphs*, October 1, 2026: breadth-first-search diagram p. 15. The editor's BFS example omits the optional colour annotations.
+- Tibor Ásványi, *Algorithms and Data Structures I — Lecture Notes*, April 21, 2026: notation pp. 4–5; insertion sort p. 20; BST diagrams p. 54.
+- *Algorithms and Data Structures II — Graphs*, October 1, 2026: BFS p. 15, with optional colour annotations omitted in the example.
 - *Algorithms and Data Structures II — Trees*, October 8, 2025: AVL balance convention.
-- *Algorithms and Data Structures II — Test 1 (example exercises)*, October 8, 2026: AVL-7 motivates the fill-balances **worked solution**, not an official solution supplied in the notes.
+- *Algorithms and Data Structures II — Test 1 (example exercises)*, October 8, 2026: AVL-7 motivates the fill-balances worked solution; it is not an official supplied solution.
 
-This is an independent learning tool. The renderer follows the diagram conventions; typography and spacing approximate the PDFs rather than reproducing LaTeX exactly.
+This is an independent learning tool. Its geometry follows the lecture diagrams, with approximate typography and spacing.
 
-## Check and build
-
-```sh
-npm run build
-npm test
-```
-
-Tests cover nested branches, malformed source, course examples, mathematical notation, wrapped text, source limits, SVG escaping, and synchronization of the generated browser files. Edit the modules in `src/`, then run `npm run build` and commit both generated files (`app.bundle.js` and `Structogram.html`) along with your changes. The tests catch stale generated files. The static production output is also copied to `dist/`. All asset paths are relative, so the hosted version works under a GitHub Pages project subdirectory.
-
-## Publish on GitHub Pages
-
-1. Merge the editor into `main`.
-2. In the repository's **Settings → Pages → Build and deployment**, select **GitHub Actions**.
-3. In **Actions → Check and publish editor**, choose **Run workflow** on `main` (or push another commit to `main`).
-
-The included workflow runs the tests, builds the files, and deploys to Pages. Pull requests run checks and prepare the artifact without deploying. The repository must have Pages enabled and a plan/visibility that supports it. The final site address is provided by the successful deployment.
-
-## Project layout
+## Files
 
 | File | Purpose |
 | --- | --- |
-| `index.html`, `styles.css` | Responsive editor and syntax guide |
-| `src/parser.js` | Source parser and notation conversion |
-| `src/renderer.js` | SVG geometry shared by preview and exports |
-| `src/app.js` | Editing, storage, file I/O, zoom, and export |
-| `src/examples.js` | Editable ADS examples |
-| `desktop/` | Desktop window, macOS menus, sandboxed preload and native file dialogs |
-| `app.bundle.js`, `Structogram.html` | Generated, ready-to-open files included in GitHub ZIPs |
-| `scripts/` | Dependency-free dev server and static build |
-| `tests/diagram.test.js` | Parser and export checks |
+| `src/blocks.js` | Blockly definitions, toolbox, workspace and undo |
+| `src/block-model.js` | Bidirectional block/text conversion without execution |
+| `src/parser.js`, `src/renderer.js` | Course parser and SVG geometry |
+| `src/app.js` | Mode synchronization, persistence, native file actions and export |
+| `desktop/` | Electron window, Mac menus and restricted native bridge |
+| `installer/Installation.command` | Source template for the one-script installer |
+| `scripts/create-installer.mjs` | Embeds the exact release and archive checksums |
+| `.github/workflows/desktop.yml` | Build, script installation test and release assets |
