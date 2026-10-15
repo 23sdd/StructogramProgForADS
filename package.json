@@ -1,0 +1,13 @@
+{
+  "name": "structogram-for-ads",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A local-first structogram editor using the conventions of the ELTE ADS lecture notes.",
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "build": "node scripts/build.mjs",
+    "test": "node --test"
+  },
+  "engines": { "node": ">=20" }
+}
