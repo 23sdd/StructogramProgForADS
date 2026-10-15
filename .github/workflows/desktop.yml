@@ -30,6 +30,8 @@ jobs:
         run: npm run package:mac
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: 'false'
+          # This job excludes forks and uses ad-hoc signing only, without certificate secrets.
+          CSC_FOR_PULL_REQUEST: 'true'
       - name: Create the version-pinned script installer
         env:
           BUILD_COMMIT: ${{ github.event.pull_request.head.sha || github.sha }}
