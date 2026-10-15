@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f7f8f6">
+  <meta name="description" content="Write algorithms and draw structograms in the notation of your ADS lectures. Live preview, course examples, and image export.">
+  <title>Structogram — ADS workspace</title>
+  <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="module" src="./src/app.js"></script>
+</head>
+<body>
+  <div class="app-shell">
+    <aside id="sidebar" class="sidebar" aria-label="Workspace navigation">
+      <a class="brand" href="./" aria-label="Structogram home"><span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span><span>Structogram<span class="brand-caption">YOUR ADS WORKSPACE</span></span></a>
+      <button id="new-document" class="new-button"><span aria-hidden="true">＋</span> New algorithm</button>
+      <div class="sidebar-label">WORKSPACE</div>
+      <div class="workspace-item"><span aria-hidden="true">▧</span><span id="document-label">Insertion sort</span><span class="active-dot"></span></div>
+      <div class="library-heading"><span class="sidebar-label">COURSE EXAMPLES</span><span class="count">6</span></div>
+      <nav id="examples" aria-label="Load a course example"></nav>
+      <div class="sidebar-bottom">
+        <div class="course-note"><span class="note-icon" aria-hidden="true">⌑</span><div><strong>Made for your lectures</strong><p>ADS I & II · ELTE notation</p></div></div>
+        <button id="open-guide" class="guide-button"><span aria-hidden="true">?</span> Syntax & notation <span aria-hidden="true">↗</span></button>
+      </div>
+    </aside>
+
+    <main>
+      <header class="topbar">
+        <div class="breadcrumbs"><button id="toggle-nav" class="mobile-nav-toggle" aria-label="Open examples and syntax guide" aria-controls="sidebar" aria-expanded="false">☰</button>Workspace <span aria-hidden="true">/</span> <strong>Algorithm editor</strong></div>
+        <div class="top-actions"><span class="local-badge"><span></span> Stays in your browser</span><button id="import-source" class="button button-quiet">Open file</button><button id="save-source" class="button">Save source <span aria-hidden="true">↓</span></button></div>
+      </header>
+
+      <section class="document-header" aria-label="Document settings">
+        <div><div class="eyebrow">THINK IT. WRITE IT. SEE IT.</div><label class="sr-only" for="document-title">Document title</label><input id="document-title" value="Insertion sort" maxlength="100" spellcheck="false"><p>Your algorithm, in the language of your lectures.</p></div>
+        <span id="save-status" class="save-status" role="status">Saved on this device</span>
+      </section>
+
+      <div class="editor-workspace">
+        <section class="source-panel" aria-label="Algorithm source editor">
+          <header class="panel-header"><div><span class="panel-icon" aria-hidden="true">⌘</span><h1>Pseudocode</h1></div><span class="panel-detail">2 spaces to indent</span></header>
+          <div class="insert-toolbar" aria-label="Insert a construct"><button data-insert="statement" title="Insert a statement">＋ Statement</button><button data-insert="if">If / else</button><button data-insert="while">While</button><button data-insert="for">For</button><button data-insert="select">Selection</button></div>
+          <div class="code-area"><div id="line-numbers" class="line-numbers" aria-hidden="true"></div><label for="source" class="sr-only">Algorithm pseudocode. Use Tab to indent and Shift Tab to unindent.</label><textarea id="source" wrap="off" spellcheck="false" autocapitalize="off" autocomplete="off" autocorrect="off" aria-describedby="editor-hint"></textarea></div>
+          <div class="symbol-toolbar" aria-label="Insert mathematical notation"><span>SYMBOLS</span><div id="symbols"></div></div>
+          <footer class="source-footer"><span id="cursor-position">Ln 1, Col 1</span><span id="editor-hint">Tab to indent · click a diagram row to edit</span></footer>
+        </section>
+
+        <section class="preview-panel" aria-label="Structogram preview">
+          <header class="panel-header"><div><span class="panel-icon" aria-hidden="true">▤</span><h2>Structogram</h2><span class="live-badge"><span></span>LIVE</span></div><button id="print-diagram" class="button button-quiet" title="Print the diagram or save it as a PDF">Print / PDF <span aria-hidden="true">↗</span></button></header>
+          <div class="preview-toolbar"><span class="notation-label">Lecture notation <span title="Rounded signatures, loop rails, and diagonal selection marks, based on the course PDFs.">ⓘ</span></span><div class="export-actions"><label class="sr-only" for="export-format">Export format</label><select id="export-format"><option value="svg">SVG</option><option value="png">PNG</option></select><button id="export-diagram" class="button button-primary">Export <span aria-hidden="true">↓</span></button></div></div>
+          <div id="parse-error" class="parse-error" role="alert" hidden></div>
+          <div id="preview-viewport" class="preview-viewport"><div id="diagram-stage" class="diagram-stage"></div></div>
+          <footer class="preview-footer"><span id="diagram-status"><span class="status-dot"></span> Diagram is up to date</span><div class="zoom-controls"><button id="zoom-out" aria-label="Zoom out">−</button><button id="zoom-reset" title="Reset to 100%">100%</button><button id="zoom-in" aria-label="Zoom in">＋</button><span class="zoom-divider"></span><button id="zoom-fit">Fit</button></div></footer>
+        </section>
+      </div>
+      <div class="workspace-footer"><span>Small steps. Clear algorithms.</span><span>Sequences <i></i> Selections <i></i> Iterations</span></div>
+    </main>
+  </div>
+
+  <button id="nav-backdrop" aria-label="Close navigation" hidden></button>
+  <input id="file-input" type="file" accept=".txt,.ads,.str,.json,text/plain,application/json" hidden>
+  <div id="toast" role="status" hidden></div>
+  <dialog id="guide-dialog" aria-labelledby="guide-title">
+    <header class="dialog-header"><div><span class="eyebrow">A QUICK REFERENCE</span><h2 id="guide-title">Write it like your lectures.</h2></div><button data-close="guide-dialog" class="close-button" aria-label="Close syntax guide">×</button></header>
+    <div class="guide-content"><p>Start with a routine signature. Indent its statements with two spaces. The editor turns indentation into boxes; control keywords only guide the layout.</p><pre>search(t : Node*; k : T) : Node*
+  while t ≠ ∅ ∧ t→key ≠ k
+    if k &lt; t→key
+      t := t→left
+    else
+      t := t→right
+  return t</pre><div class="guide-grid"><div><h3>Constructs</h3><p><code>if condition</code>, <code>else if condition</code>, <code>else</code><br><code>while condition</code><br><code>for i := 0 to n − 1</code><br><code>for u ∈ G.V</code><br><code>select</code> with indented <code>case condition</code> branches and optional <code>otherwise</code>.</p><p>An omitted <code>else</code> becomes <code>SKIP</code>. A routine or control block needs a body. You can put several routines in one document.</p></div><div><h3>Course notation</h3><p><code>:=</code> assignment · <code>=</code> equality<br><code>∅</code> null pointer · <code>→</code> pointer field<br><code>∧ ∨ ¬</code> logical operators<br><code>∀ ∈</code> iteration over a collection</p><p>In the diagram, <code>-&gt; != &lt;= &gt;= &amp;&amp; ||</code> become <code>→ ≠ ≤ ≥ ∧ ∨</code>. Source text stays as typed. Use <code>//</code> for a comment row.</p></div></div><div class="guide-source"><strong>Based on the uploaded course notes</strong><p>Tibor Ásványi, <em>Algorithms and Data Structures I</em>, April 21, 2026: notation pp. 4–5, insertion sort p. 20, BST routines p. 54. <em>Algorithms and Data Structures II — Graphs</em>, October 1, 2026: BFS p. 15. This is an independent editor, not a university service or an algorithm checker.</p></div></div>
+  </dialog>
+  <dialog id="replace-dialog" aria-labelledby="replace-title"><header class="dialog-header"><h2 id="replace-title">Replace this algorithm?</h2><button data-close="replace-dialog" class="close-button" aria-label="Cancel">×</button></header><p>Your current work is saved in this browser. Save a source file first if you want to keep it after loading a different example.</p><div class="dialog-actions"><button id="save-before-replace" class="button">Save source first</button><button data-close="replace-dialog" class="button">Cancel</button><button id="confirm-replace" class="button button-primary">Replace</button></div></dialog>
+</body>
+</html>
