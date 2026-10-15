@@ -8,6 +8,8 @@ The diagram follows the lecture PDFs: rounded routine signatures, thin monochrom
 
 ## Run locally
 
+For the simplest setup, download the standalone **Structogram.html** release and double-click it. The complete editor runs in the browser without installation. Browser storage support for local files varies, so use **Save source** to keep a copy of important work.
+
 Requires Node.js 20 or later. There are **no dependencies to install**.
 
 ```sh
@@ -90,7 +92,7 @@ npm test
 npm run build
 ```
 
-Tests cover nested branches, malformed source, course examples, mathematical notation, wrapped text, source limits, and SVG escaping. The static production output is in `dist/`. All asset paths are relative, so it works under a GitHub Pages project subdirectory.
+Tests cover nested branches, malformed source, course examples, mathematical notation, wrapped text, source limits, and SVG escaping. The static production output is in `dist/`, including a self-contained `Structogram.html` for use without a server. All asset paths are relative, so the hosted version also works under a GitHub Pages project subdirectory.
 
 ## Publish on GitHub Pages
 
