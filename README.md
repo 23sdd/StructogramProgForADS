@@ -1,6 +1,6 @@
 # Structogram for ADS
 
-A browser editor for writing algorithms in the structure-diagram notation used in the ELTE Algorithms and Data Structures lectures. Type indented pseudocode on the left and see the diagram on the right.
+A browser editor for writing algorithms in the structure-diagram notation used in the ELTE Algorithms and Data Structures lectures. Type indented pseudocode on the left and see the diagram on the right. The goal is to write solutions in the same style your professor uses during lectures.
 
 The diagram follows the lecture PDFs: rounded routine signatures, thin monochrome borders, left-hand loop rails, shallow diagonal selection marks, and `SKIP` for an empty branch. Control keywords guide the editor and are omitted from the rendered diagram.
 
