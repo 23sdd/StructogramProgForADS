@@ -465,7 +465,7 @@ function defineAdsBlocks(B) {
 
 function createBlockEditor(element, onChange) {
   const B = window.Blockly;
-  if (!B) throw new Error('The local block editor could not load. Reinstall the application.');
+  if (!B) throw new Error('The block editor could not load. Reopen the page online to reload its files.');
   defineAdsBlocks(B);
   const toolbox = { kind: 'categoryToolbox', contents: [
     { kind: 'category', name: 'Algorithm', colour: '#315c62', contents: [{ kind: 'block', type: 'ads_routine' }] },
@@ -544,14 +544,14 @@ function createBlockEditor(element, onChange) {
 const $ = id => document.getElementById(id);
 const source = $('source'), stage = $('diagram-stage'), title = $('document-title');
 const storageKey = 'structogram.ads.workspace.v1';
-const desktop = window.structogramDesktop;
 const canvas = document.createElement('canvas');
 const context = canvas.getContext('2d');
 context.font = 'italic 18px "Times New Roman", Georgia, serif';
 let documentState = { ...examples[0], modified: false };
 let currentDiagram, valid = false, zoom = 1, fitMode = true, renderTimer, toastTimer, pendingReplacement;
 let storageAvailable = true;
-let visual = null, editorMode = 'blocks', lastBlockSource = '';
+// Start in text mode so restoring a saved text document never flushes an empty workspace.
+let visual = null, editorMode = 'text', lastBlockSource = '';
 
 try {
   const stored = JSON.parse(localStorage.getItem(storageKey));
@@ -686,7 +686,7 @@ function loadDocument(next) {
 
 function setEditorMode(mode) {
   if (mode === 'blocks') {
-    if (!visual) { toast('The visual editor is unavailable. Reinstall the application.'); return false; }
+    if (!visual) { toast('The visual editor is unavailable. Reopen the page online to reload its files.'); return false; }
     try {
       parse(source.value);
       if (lastBlockSource !== source.value) {
@@ -772,7 +772,6 @@ function insertConstruct(kind) {
 
 async function download(blob, extension) {
   const filename = (title.value.trim().replace(/[^\p{L}\p{N}_.-]+/gu, '-').replace(/^-+|-+$/g, '') || 'algorithm') + extension;
-  if (desktop) return desktop.saveFile({ name: filename, bytes: new Uint8Array(await blob.arrayBuffer()) });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -870,16 +869,10 @@ $('print-diagram').addEventListener('click', async () => {
   if (editorMode === 'blocks') visual?.flush();
   updatePreview();
   if (!valid) return;
-  try { if (desktop) await desktop.print(); else window.print(); }
+  try { window.print(); }
   catch { toast('Could not open the print dialog.'); }
 });
-$('import-source').addEventListener('click', async () => {
-  if (!desktop) { $('file-input').click(); return; }
-  try {
-    const file = await desktop.openFile();
-    if (file) importSource(file.name, file.text);
-  } catch { toast('Could not open the file. Choose a source file smaller than 400 KB.'); }
-});
+$('import-source').addEventListener('click', () => $('file-input').click());
 $('file-input').addEventListener('change', async event => {
   const file = event.target.files[0];
   event.target.value = '';
@@ -947,17 +940,9 @@ $('zoom-out').addEventListener('click', () => changeZoom(-.1));
 $('zoom-reset').addEventListener('click', () => { fitMode = false; zoom = 1; applyZoom(); });
 $('zoom-fit').addEventListener('click', () => { fitMode = true; applyZoom(); });
 new ResizeObserver(() => { if (fitMode) applyZoom(); if (editorMode === 'blocks') visual?.resize(); }).observe($('preview-viewport'));
-if (desktop) {
-  document.querySelector('.local-badge').lastChild.textContent = ' Saved on your Mac';
-  desktop.onMenuAction(action => {
-    if (action === 'undo' || action === 'redo') { undoEditing(action === 'redo'); return; }
-    const commands = { new: 'new-document', open: 'import-source', save: 'save-source', print: 'print-diagram', guide: 'open-guide' };
-    $(commands[action])?.click();
-  });
-}
 document.addEventListener('keydown', event => {
   if (event.key === 'Escape' && document.body.classList.contains('nav-open')) { closeNavigation(); $('toggle-nav').focus(); }
-  if (!desktop && (event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveSource(); }
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveSource(); }
 });
 window.addEventListener('beforeprint', updatePreview);
 window.addEventListener('pagehide', persist);

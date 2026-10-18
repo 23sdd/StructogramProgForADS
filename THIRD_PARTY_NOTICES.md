@@ -7,11 +7,8 @@ The application uses these open-source components:
 | Component | Purpose | License/source |
 | --- | --- | --- |
 | Blockly | Visual block connections, editing, drag/drop, undo and serialization | Apache-2.0; https://github.com/RaspberryPiFoundation/blockly |
-| Electron | Desktop window, native menus and file dialogs | MIT; https://github.com/electron/electron |
-| Chromium | Local interface rendering inside Electron | BSD-style and third-party licenses; https://www.chromium.org/ |
-| Node.js | File operations in the desktop main process | MIT and third-party notices; https://github.com/nodejs/node |
-| electron-builder | Development-time packaging | MIT; https://github.com/electron-userland/electron-builder |
+| Node.js | Development-time build and test tools only; not shipped as a runtime | MIT and third-party notices; https://github.com/nodejs/node |
 
-Blockly's complete LICENSE is bundled in `dist/vendor/blockly/LICENSE`. Electron distributions include their license and Chromium third-party notices. These upstream notices must remain with redistributed components. The runtime needs no accounts, CDN, proprietary service, or hosted algorithm processing.
+Blockly's complete LICENSE is bundled in `dist/vendor/blockly/LICENSE`. Its upstream notices must remain with redistributed components. The browser editor does not bundle Electron or Chromium and does not execute algorithm blocks. There are no accounts, CDN, or hosted algorithm processing.
 
 The professor's PDFs and exam materials are not redistributed and are not covered by the above component licenses. They are references for the notation.

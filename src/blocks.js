@@ -40,7 +40,7 @@ export function defineAdsBlocks(B) {
 
 export function createBlockEditor(element, onChange) {
   const B = window.Blockly;
-  if (!B) throw new Error('The local block editor could not load. Reinstall the application.');
+  if (!B) throw new Error('The block editor could not load. Reopen the page online to reload its files.');
   defineAdsBlocks(B);
   const toolbox = { kind: 'categoryToolbox', contents: [
     { kind: 'category', name: 'Algorithm', colour: '#315c62', contents: [{ kind: 'block', type: 'ads_routine' }] },

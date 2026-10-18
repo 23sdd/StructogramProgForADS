@@ -2,15 +2,20 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta name="referrer" content="no-referrer">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#f7f8f6">
   <meta name="description" content="Write algorithms and draw structograms in the notation of your ADS lectures. Live preview, course examples, and image export.">
   <title>Structogram — ADS workspace</title>
   <link rel="icon" type="image/svg+xml" href="./assets/favicon.svg">
+  <link rel="manifest" href="./manifest.webmanifest">
+  <link rel="apple-touch-icon" href="./assets/app-icon.png">
   <link rel="stylesheet" href="./styles.css">
   <script defer src="./vendor/blockly/blockly_compressed.js"></script>
   <script defer src="./vendor/blockly/en.js"></script>
   <script defer src="./app.bundle.js"></script>
+  <script defer src="./pwa.js"></script>
 </head>
 <body>
   <div class="app-shell">
@@ -56,13 +61,17 @@
           <footer class="preview-footer"><span id="diagram-status"><span class="status-dot"></span> Diagram is up to date</span><div class="zoom-controls"><button id="zoom-out" aria-label="Zoom out">−</button><button id="zoom-reset" title="Reset to 100%">100%</button><button id="zoom-in" aria-label="Zoom in">＋</button><span class="zoom-divider"></span><button id="zoom-fit">Fit</button></div></footer>
         </section>
       </div>
-      <div class="workspace-footer"><span>Small steps. Clear algorithms.</span><span>Sequences <i></i> Selections <i></i> Iterations</span></div>
+      <div class="workspace-footer"><span id="offline-status" role="status">Preparing offline access…</span><button id="install-app" class="button button-quiet">Use as an app</button><span>Sequences <i></i> Selections <i></i> Iterations</span></div>
     </main>
   </div>
 
   <button id="nav-backdrop" aria-label="Close navigation" hidden></button>
   <input id="file-input" type="file" accept=".txt,.ads,.str,.json,text/plain,application/json" hidden>
   <div id="toast" role="status" hidden></div>
+  <dialog id="install-dialog" aria-labelledby="install-title">
+    <header class="dialog-header"><h2 id="install-title">Keep Structogram close</h2><button id="close-install" class="close-button" aria-label="Close app instructions">×</button></header>
+    <div class="guide-content"><p><strong>Safari on Mac (macOS Sonoma or later):</strong> choose File → Add to Dock. This opens the editor in its own window.</p><p><strong>Chrome / Edge:</strong> use the install icon in the address bar, or the browser menu → Install app.</p><p><strong>iPhone / iPad:</strong> Safari → Share → Add to Home Screen.</p><p>Wait for “Ready offline” before disconnecting. Your work stays in this browser profile. Use <strong>Save source</strong> to keep a backup: clearing site data can remove your document and offline access. After adding the app, open it once online to prepare its offline copy; use Open file to transfer a saved .ads document if needed.</p><p>No Terminal commands or Mac security exceptions are needed.</p></div>
+  </dialog>
   <dialog id="guide-dialog" aria-labelledby="guide-title">
     <header class="dialog-header"><div><span class="eyebrow">A QUICK REFERENCE</span><h2 id="guide-title">Write it like your lectures.</h2></div><button data-close="guide-dialog" class="close-button" aria-label="Close syntax guide">×</button></header>
     <div class="guide-content"><p><strong>Blocks:</strong> drag an Algorithm block, put Statement, If, While, or For blocks inside, and edit their text fields. Case blocks belong inside a Selection. Empty bodies become SKIP. Use Undo/Redo to revert a block change.</p><p><strong>Text:</strong> start with a routine signature and indent its statements with two spaces. Switch between modes to edit the same algorithm; incorrect text must be fixed before switching to Blocks. The editor draws pseudocode but never executes it.</p><pre>search(t : Node*; k : T) : Node*
