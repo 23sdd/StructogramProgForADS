@@ -1,0 +1,13 @@
+{
+  "id": "./",
+  "name": "Structogram ADS",
+  "short_name": "Structogram",
+  "description": "Write pseudocode or connect blocks to draw ADS structograms.",
+  "lang": "en",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#f7f8f6",
+  "theme_color": "#226c5c",
+  "icons": [{ "src": "./assets/app-icon.png", "sizes": "1024x1024", "type": "image/png", "purpose": "any" }]
+}

@@ -1,25 +1,40 @@
-import { cp, mkdir, rm, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { cp, mkdir, rm, writeFile, readFile, readdir } from 'node:fs/promises';
+import { createBrowserBundle } from './browser-bundle.mjs';
 
 const root = new URL('../', import.meta.url);
 const output = new URL('dist/', root);
+const bundle = await createBrowserBundle();
+// Keep the generated application code synchronized with its small source modules.
+await writeFile(new URL('app.bundle.js', root), bundle);
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
-for (const item of ['index.html', 'styles.css', 'assets', 'src']) {
+for (const item of ['index.html', 'styles.css', 'assets', 'app.bundle.js', 'manifest.webmanifest', 'pwa.js']) {
   await cp(new URL(item, root), new URL(item, output), { recursive: true });
 }
+const vendor = new URL('vendor/blockly/', output);
+await mkdir(vendor, { recursive: true });
+for (const item of ['blockly_compressed.js', 'LICENSE', 'media']) {
+  await cp(new URL(`node_modules/blockly/${item}`, root), new URL(item, vendor), { recursive: true });
+}
+await cp(new URL('node_modules/blockly/msg/en.js', root), new URL('en.js', vendor));
+await cp(new URL('THIRD_PARTY_NOTICES.md', root), new URL('THIRD_PARTY_NOTICES.md', output));
 
-// Also provide a single-file release that can be opened without a server.
-const modules = ['parser', 'renderer', 'examples', 'app'];
-const script = (await Promise.all(modules.map(async name => {
-  const content = await readFile(new URL(`src/${name}.js`, root), 'utf8');
-  return content.replace(/^import .+;\n/gm, '').replace(/^export /gm, '');
-}))).join('\n').replace(/<\/script/gi, '<\\/script');
-const css = await readFile(new URL('styles.css', root), 'utf8');
-const icon = (await readFile(new URL('assets/favicon.svg', root))).toString('base64');
-const html = (await readFile(new URL('index.html', root), 'utf8'))
-  .replace('<link rel="stylesheet" href="./styles.css">', () => `<style>${css}</style>`)
-  .replace('<script type="module" src="./src/app.js"></script>', () => `<script type="module">${script}</script>`)
-  .replace('href="./assets/favicon.svg"', () => `href="data:image/svg+xml;base64,${icon}"`)
-  .replace('href="./"', 'href="#"');
-await writeFile(new URL('Structogram.html', output), html);
-console.log('Built static editor and standalone Structogram.html in dist/');
+// Hash every deployed resource so each release has an atomic offline snapshot.
+async function filesIn(directory, prefix = '') {
+  const entries = await readdir(directory, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const name = prefix + entry.name;
+    if (entry.isDirectory()) files.push(...await filesIn(new URL(entry.name + '/', directory), name + '/'));
+    else files.push(name);
+  }
+  return files.sort();
+}
+const assets = await filesIn(output);
+const hash = createHash('sha256');
+for (const name of assets) { hash.update(name); hash.update(await readFile(new URL(name, output))); }
+const template = await readFile(new URL('scripts/service-worker-template.js', root), 'utf8');
+await writeFile(new URL('sw.js', output), template.replace('__VERSION__', hash.digest('hex').slice(0, 20)).replace('__ASSETS__', JSON.stringify(assets.map(name => './' + name))));
+await writeFile(new URL('.nojekyll', output), '');
+console.log('Built the browser editor with local Blockly assets and offline cache in dist/');
