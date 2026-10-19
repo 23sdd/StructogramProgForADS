@@ -42,6 +42,28 @@ On a wide screen, drag the handle between Algorithm and Structogram to adjust th
 
 Use the ⛶ button in either panel header to expand that panel across the browser window. **Restore** or **Escape** returns to the split view without losing edits. On narrow screens the panels remain stacked, and either can still expand. Diagram printing continues to show only the structogram.
 
+## Create data structures
+
+Open **Data structures** from the algorithm editor, or use `structures.html`. The independent workspace creates, edits and stores up to 30 structures, with up to 64 values/nodes each. Algorithm execution and binding these structures to routines are a later stage.
+
+The catalogue follows the supplied course materials:
+
+- Arrays, array-backed stacks, circular queues (`Z`, `k`, `n`), max heaps / priority queues.
+- S1L, H1L, trailer singly linked lists, cyclic singly linked lists, S2L and header C2L. Node order defines their `next` / `prev` and sentinel connections.
+- Binary trees, BST, AVL and general trees represented with `firstChild` / `nextSibling`.
+- Direct-address tables, chained hash tables and open-address tables with linear probing.
+- Abstract sets `T{}` and sequences `T⟨⟩`; sequence and graph indices start at 1, array indices at 0.
+- Simple directed and undirected graphs, with drawing, adjacency matrix and adjacency lists.
+- A manual B+ keys/children/leaf-next editor. The supplied tree notes refer to a separate B+ PDF that was not attached; the UI explicitly labels this as a standard representation, not verified against that missing file.
+
+Choose a type, name and initial values. Numbers can be comma/space separated; use JSON lists such as `[5, "two words", 7]` for text. Ordered trees, heaps and hash-table layouts currently use safe integer keys. Apply edited values, names and storage settings. Tree/graph nodes can be added, edited and removed; tree pointers and root are chosen explicitly, and graph edges connect chosen node IDs. B+ internal children are entered as node IDs. Empty structures are supported.
+
+**Apply node changes** saves the edited node rows together. Invalid references or duplicate graph edges are rejected; tree cycles, disconnected nodes, BST violations, AVL imbalance and heap violations remain visible as warnings so intermediate construction states can be inspected. AVL signs use `b = h(right) − h(left)` and `h(∅) = −1`. Creation/editing does not automatically rebalance trees or execute an algorithm. Hash layouts rebuild from keys using division hashing; in-place deleted-slot `D` operations are not part of this creation editor.
+
+**Save all** exports an `ADS-structures.json` collection; **Open structures** validates and appends a collection without replacing existing structures. **Export SVG** saves the selected drawing. Undo/Redo keeps the last 50 edits in the current session, including deletion of the final structure. Local persistence and offline navigation are separate from the algorithm document. Apply drafts before leaving; pending form edits block automatic app updates to avoid losing them. Clearing site data can remove local collections, so keep file backups.
+
+![The structure editor](docs/structures-preview.png)
+
 ## Source notation
 
 ```text
