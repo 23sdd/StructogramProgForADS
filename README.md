@@ -36,6 +36,12 @@ Use the visual Undo/Redo buttons. Click a diagram row to find its matching block
 
 The current document, selected mode, and visual layout are saved locally. Separate `.ads` files contain editable pseudocode; reopening them reconstructs their blocks. No accounts, analytics, external fonts, CDN, or server-side document processing are used. Online requests fetch application assets and check for application updates; algorithm contents are not uploaded. Hosting providers still receive ordinary requests for site assets.
 
+## Resize and expand panels
+
+On a wide screen, drag the handle between Algorithm and Structogram to adjust their widths. The ratio is saved on this device. Focus the handle and use Left/Right (Shift for larger steps), Home/End for the limits, or Enter/double-click to reset.
+
+Use the ⛶ button in either panel header to expand that panel across the browser window. **Restore** or **Escape** returns to the split view without losing edits. On narrow screens the panels remain stacked, and either can still expand. Diagram printing continues to show only the structogram.
+
 ## Source notation
 
 ```text

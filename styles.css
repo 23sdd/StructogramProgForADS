@@ -1096,3 +1096,31 @@ body {
 .blocks-hint{display:flex;align-items:center;justify-content:space-between;gap:8px}
 .blocks-hint>div{display:flex;gap:4px;flex:none}
 .blocks-hint button{font-size:9px;border:1px solid #dce5d5;border-radius:4px;background:white;padding:4px 6px;color:#6c7f60}
+
+/* Resizable split view; narrow screens keep vertically stacked panels. */
+@media screen and (min-width:861px) {
+  .editor-workspace { grid-template-columns:minmax(0,var(--algorithm-share,44fr)) 10px minmax(0,var(--structogram-share,56fr)); }
+}
+#panel-divider { display:flex;align-items:center;justify-content:center;cursor:col-resize;touch-action:none;background:#f1f5ee;border-inline:1px solid #dce2d8; }
+#panel-divider span { width:3px;height:40px;border-radius:3px;background:#a0b399; }
+#panel-divider:hover,#panel-divider:focus-visible { background:#dcead7;outline:2px solid #226c5c;outline-offset:-2px; }
+.resizing-panels,.resizing-panels * { cursor:col-resize!important;user-select:none!important; }
+.panel-expand { flex:none;min-width:32px;min-height:32px;border:1px solid #dce2d8;background:white;border-radius:5px;color:#226c5c;font-size:15px;padding:4px 7px;white-space:nowrap; }
+.panel-expand:hover { background:#edf4e9; }
+.panel-header { flex-wrap:wrap;height:auto;min-height:61px;padding-block:8px; }
+.panel-actions { flex-wrap:wrap;justify-content:flex-end; }
+.source-panel { border-right:0; }
+@media screen and (max-width:860px) { #panel-divider { display:none; } }
+@media screen {
+  body.panel-expanded { overflow:hidden; }
+  .editor-workspace[data-expanded="algorithm"],.editor-workspace[data-expanded="structogram"] { position:fixed;inset:12px;z-index:100;min-height:0;grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr); }
+  .editor-workspace[data-expanded="algorithm"] .preview-panel,
+  .editor-workspace[data-expanded="structogram"] .source-panel,
+  .editor-workspace[data-expanded="algorithm"] #panel-divider,
+  .editor-workspace[data-expanded="structogram"] #panel-divider { display:none; }
+  .editor-workspace[data-expanded="algorithm"] .source-panel { border:0; }
+  .editor-workspace[data-expanded="algorithm"] #block-workspace,
+  .editor-workspace[data-expanded="algorithm"] .code-area { min-height:0;height:auto;flex:1; }
+  .editor-workspace[data-expanded="structogram"] .preview-viewport { min-height:0;max-height:none;flex:1; }
+}
+@media print { #panel-divider,.panel-expand { display:none!important; } }

@@ -1,3 +1,4 @@
+import { initWorkspaceLayout } from './layout.js';
 import { parse } from './parser.js';
 import { render } from './renderer.js';
 import { examples, blank } from './examples.js';
@@ -442,3 +443,8 @@ updateLines();
 updateDocumentLabel();
 updatePreview();
 if (!storageAvailable) $('save-status').textContent = 'Use Save source to keep your work';
+
+initWorkspaceLayout(() => {
+  if (editorMode === 'blocks') visual?.resize();
+  if (fitMode) applyZoom();
+});
