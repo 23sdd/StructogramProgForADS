@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises';
 const root = new URL('../', import.meta.url);
 
 export async function createBrowserBundle() {
-  const modules = ['parser', 'renderer', 'examples', 'block-model', 'blocks', 'app'];
+  const modules = ['parser', 'renderer', 'examples', 'block-model', 'blocks', 'layout', 'app'];
   const source = (await Promise.all(modules.map(async name => {
     const content = await readFile(new URL(`src/${name}.js`, root), 'utf8');
     return content.replace(/^import .+;\n/gm, '').replace(/^export /gm, '');
