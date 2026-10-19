@@ -2,7 +2,7 @@
 (() => {
 'use strict';
 const start = () => {
-/** The document language uses indentation; expressions are kept as text, never executed. */
+/** The document language uses indentation; the diagram parser keeps expressions as text. The optional execution layer compiles a bounded subset separately. */
 class ParseError extends Error {
   constructor(message, line) {
     super(message);
@@ -522,6 +522,7 @@ function createBlockEditor(element, onChange) {
       if (lastError) onChange({ error: lastError, state: save() });
     },
     save,
+    highlightLine(line) { workspace.highlightBlock(line ? lineMap[line] || null : null); },
     flush: publish,
     resize() { B.svgResize(workspace); },
     undo(redo = false) { workspace.undo(redo); publish(); },
@@ -632,6 +633,798 @@ function initWorkspaceLayout(onResize) {
   new ResizeObserver(apply).observe(workspace);
   desktopLayout.addEventListener('change', () => { endDrag(); apply(); });
   apply();
+}
+
+// Structure documents contain data only. They are never evaluated as code.
+const structureTypes = [
+  ['array','Array','linear'], ['stack','Stack','linear'], ['queue','Circular queue','linear'],
+  ['s1l','Singly linked list · S1L','list'], ['h1l','Header singly linked list · H1L','list'], ['t1l','Trailer singly linked list','list'],
+  ['c1l','Circular singly linked list','list'], ['s2l','Doubly linked list · S2L','list'], ['c2l','Header circular doubly linked list · C2L','list'],
+  ['binary','Binary tree','tree'], ['bst','Binary search tree','tree'], ['avl','AVL tree','tree'],
+  ['heap','Max heap / priority queue','linear'], ['general','General tree · firstChild / nextSibling','tree'], ['bplus','B+ tree · manual construction','tree'],
+  ['direct','Direct-address table','hash'], ['chain','Hash table · chaining','hash'], ['open','Hash table · open addressing','hash'],
+  ['set','Set · T{}','linear'], ['sequence','Sequence · T⟨⟩','linear'], ['graph','Undirected graph','graph'], ['digraph','Directed graph','graph']
+].map(([kind,label,family])=>({kind,label,family}));
+const structureLimit = 64;
+function structureType(kind) {
+  const result=structureTypes.find(type=>type.kind===kind);
+  if(!result) throw Error('Unknown structure type.');
+  return result;
+}
+function parseValues(text) {
+  if(typeof text!=='string'||text.length>12000) throw Error('Use a value list shorter than 12,000 characters.');
+  const source=text.trim();
+  let values;
+  if(!source) values=[];
+  else if(source.startsWith('[')) { try{values=JSON.parse(source);}catch{throw Error('Invalid JSON value list. Example: [5, 3, "label"].');} }
+  else values=source.split(/[\s,;]+/u).filter(Boolean).map(value=>/^[+-]?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/i.test(value)?Number(value):value);
+  validateValues(values);
+  return values;
+}
+function validateValues(values) {
+  if(!Array.isArray(values)||values.length>structureLimit) throw Error(`Use at most ${structureLimit} values.`);
+  for(const value of values) if(!((typeof value==='number'&&Number.isFinite(value))||(typeof value==='string'&&value.length<=80))) throw Error('Values must be finite numbers or text of at most 80 characters.');
+}
+function integer(value,min,max,label) { if(!Number.isInteger(value)||value<min||value>max) throw Error(`${label} must be an integer between ${min} and ${max}.`); }
+function makeStructure(kind,name,values=[],capacity=8) {
+  const type=structureType(kind);validateValues(values);
+  const doc={kind,name:name.trim()||'A',values:[...values],capacity,start:0,nodes:[],edges:[],root:null};
+  if(type.family==='tree'||type.family==='graph'){
+    doc.nodes=values.map((key,index)=>({id:'n'+(index+1),key,left:null,right:null,firstChild:null,nextSibling:null,keys:kind==='bplus'?[key]:[],children:[],next:null}));
+    doc.values=[];doc.root=doc.nodes[0]?.id||null;
+    if(kind==='bst'||kind==='avl') {
+      doc.root=null;
+      for(const node of doc.nodes){
+        if(doc.root===null){doc.root=node.id;continue;}
+        let current=doc.nodes.find(n=>n.id===doc.root);
+        while(true){
+          const field=node.key<current.key?'left':'right';
+          if(current[field]===null){current[field]=node.id;break;}
+          current=doc.nodes.find(n=>n.id===current[field]);
+        }
+      }
+    }else if(kind==='binary'){
+      doc.nodes.forEach((n,i)=>{n.left=doc.nodes[i*2+1]?.id||null;n.right=doc.nodes[i*2+2]?.id||null;});
+    }else if(kind==='general'){
+      if(doc.nodes[0])doc.nodes[0].firstChild=doc.nodes[1]?.id||null;
+      doc.nodes.slice(1).forEach((n,i)=>{n.nextSibling=doc.nodes[i+2]?.id||null;});
+    }else if(kind==='bplus'){
+      // Start with one editable leaf; users explicitly construct internal nodes.
+      doc.nodes=values.length?[{...doc.nodes[0],keys:[...values]}]:[];
+    }
+  }
+  return validateStructure(doc);
+}
+function validateStructure(raw) {
+  if(!raw||typeof raw!=='object')throw Error('Invalid structure document.');
+  const type=structureType(raw.kind);
+  if(typeof raw.name!=='string'||!raw.name.trim()||raw.name.length>60)throw Error('Give the structure a name of 1–60 characters.');
+  validateValues(raw.values);integer(raw.capacity,1,64,'Capacity');integer(raw.start,0,raw.capacity-1,'Queue start k');
+  if(!Array.isArray(raw.nodes)||raw.nodes.length>64||!Array.isArray(raw.edges)||raw.edges.length>512)throw Error('Use at most 64 nodes and 512 edges.');
+  const ids=new Set();
+  const nodes=raw.nodes.map(n=>{
+    if(!n||typeof n.id!=='string'||!/^n[1-9]\d{0,5}$/.test(n.id)||ids.has(n.id))throw Error('Node IDs must be unique, e.g. n1, n2.');
+    ids.add(n.id);validateValues([n.key]);validateValues(n.keys||[]);
+    if(!Array.isArray(n.children||[])||(n.children||[]).length>64)throw Error('Invalid child list.');
+    return {id:n.id,key:n.key,left:n.left??null,right:n.right??null,firstChild:n.firstChild??null,nextSibling:n.nextSibling??null,keys:[...(n.keys||[])],children:[...(n.children||[])],next:n.next??null};
+  });
+  for(const n of nodes)for(const ref of [n.left,n.right,n.firstChild,n.nextSibling,n.next,...n.children])if(ref!==null&&!ids.has(ref))throw Error(`Unknown pointer ${String(ref).slice(0,80)} in ${n.id}.`);
+  if(raw.root!==null&&!ids.has(raw.root))throw Error('Root must reference an existing node or ∅.');
+  const edges=raw.edges.map(e=>{if(!e||!ids.has(e.from)||!ids.has(e.to)||e.from===e.to)throw Error('An edge must join two distinct existing nodes.');return{from:e.from,to:e.to};});
+  const seen=new Set();for(const e of edges){const key=type.kind==='graph'?[e.from,e.to].sort().join(':'):e.from+':'+e.to;if(seen.has(key))throw Error('Duplicate graph edge.');seen.add(key);}
+  if(['stack','queue','heap'].includes(raw.kind)&&raw.values.length>raw.capacity)throw Error('The values exceed the storage capacity.');
+  if(raw.kind==='set'&&new Set(raw.values).size!==raw.values.length)throw Error('A set cannot contain duplicate values.');
+  if(['heap','direct','chain','open','bst','avl','bplus'].includes(raw.kind)){
+    const keys=type.family==='tree'?nodes.flatMap(n=>raw.kind==='bplus'?n.keys:[n.key]):raw.values;
+    if(keys.some(k=>typeof k!=='number'||!Number.isSafeInteger(k)))throw Error('This editor uses safe integer keys for ordered trees, heaps and hash tables.');
+  }
+  if(raw.kind==='direct'&&raw.values.some(v=>v<0||v>=raw.capacity))throw Error('Direct-address keys must be in 0..m−1.');
+  if(['direct','chain','open'].includes(raw.kind)&&new Set(raw.values).size!==raw.values.length)throw Error('Hash-table keys must be unique.');
+  if(raw.kind==='open'&&raw.values.length>raw.capacity)throw Error('The open-address table is full.');
+  return{kind:raw.kind,name:raw.name.trim(),values:[...raw.values],capacity:raw.capacity,start:raw.start,nodes,edges,root:raw.root};
+}
+function treeLinks(doc,node) {
+  if(doc.kind==='general')return[node.firstChild,node.nextSibling].filter(Boolean);
+  if(doc.kind==='bplus')return node.children;
+  return[node.left,node.right].filter(Boolean);
+}
+function analyseStructure(doc) {
+  const issues=[];const metrics={};const type=structureType(doc.kind);
+  if(doc.kind==='heap')doc.values.forEach((key,i)=>{if(i&&doc.values[Math.floor((i-1)/2)]<key)issues.push(`Max-heap order is violated at A[${i}].`);});
+  if(type.family!=='tree')return{issues,metrics};
+  const byId=new Map(doc.nodes.map(n=>[n.id,n])),active=new Set(),visited=new Set(),parents=new Map();
+  let cyclic=false;
+  function visit(id){if(!id)return -1;if(active.has(id)){cyclic=true;return -1;}if(visited.has(id))return metrics[id]?.height??-1;active.add(id);const n=byId.get(id);const links=treeLinks(doc,n);let height=-1;for(const child of links){parents.set(child,(parents.get(child)||0)+1);height=Math.max(height,visit(child));}active.delete(id);visited.add(id);const lh=metrics[n.left]?.height??-1,rh=metrics[n.right]?.height??-1;metrics[id]={height:height+1,balance:rh-lh};return height+1;}
+  visit(doc.root);for(const n of doc.nodes)if(!visited.has(n.id)){issues.push(`${n.id} is disconnected from the root.`);visit(n.id);}
+  if(doc.nodes.length&&!doc.root)issues.push('Choose a root.');
+  if(cyclic)issues.push('Tree pointers contain a cycle.');
+  for(const [id,n]of parents)if(n>1)issues.push(`${id} has more than one incoming tree pointer.`);
+  if(!cyclic&&['bst','avl'].includes(doc.kind)){
+    const check=(id,low,high)=>{if(!id)return;const n=byId.get(id);if(n.key<=low||n.key>=high)issues.push(`${id}: key ${n.key} violates strict BST ordering.`);check(n.left,low,Math.min(high,n.key));check(n.right,Math.max(low,n.key),high);};
+    // Shared children can multiply paths, so report their topology before checking order.
+    if([...parents.values()].every(n=>n<=1))check(doc.root,-Infinity,Infinity);
+    if(doc.kind==='avl')for(const [id,m]of Object.entries(metrics))if(Math.abs(m.balance)>1)issues.push(`${id}: b = ${m.balance}; this node is not AVL-balanced.`);
+  }
+  if(!cyclic&&doc.kind==='bplus'){
+    const depths=new Set(),seen=new Set();
+    const check=(id,depth,lo,hi)=>{if(!id||seen.has(id))return;seen.add(id);const n=byId.get(id);if(n.keys.some((k,i)=>i>0&&n.keys[i-1]>=k))issues.push(`${id}: keys must be strictly increasing.`);if(n.keys.some(k=>k<lo||k>=hi))issues.push(`${id}: a key is outside its separator range.`);if(n.children.length){if(n.children.length!==n.keys.length+1)issues.push(`${id}: an internal node needs keys.length + 1 children.`);n.children.forEach((c,i)=>check(c,depth+1,i===0?lo:n.keys[i-1]??hi,i===n.keys.length?hi:n.keys[i]??hi));}else depths.add(depth);};
+    check(doc.root,0,-Infinity,Infinity);if(depths.size>1)issues.push('B+ leaves are not at the same depth.');
+    {
+      for(const n of doc.nodes)if(n.children.length&&n.next)issues.push(`${n.id}: next belongs to leaves, not internal nodes.`);
+      const leaves=[];const seenLeaves=new Set();const collect=id=>{if(!id||seenLeaves.has(id))return;seenLeaves.add(id);const n=byId.get(id);if(n.children.length)n.children.forEach(collect);else leaves.push(n);};collect(doc.root);
+      leaves.forEach((n,i)=>{if(n.next!==(leaves[i+1]?.id||null))issues.push(`${n.id}: next should be ${leaves[i+1]?.id||'∅'} in the leaf chain.`);});
+    }
+  }
+  if(doc.kind==='general'&&doc.root&&byId.get(doc.root).nextSibling)issues.push('The root must not have a nextSibling.');
+  return{issues:[...new Set(issues)],metrics};
+}
+function graphRepresentations(doc) {
+  const ids=doc.nodes.map(n=>n.id),adj=ids.map(()=>[]),matrix=ids.map(()=>ids.map(()=>0));
+  for(const e of doc.edges){const i=ids.indexOf(e.from),j=ids.indexOf(e.to);matrix[i][j]=1;adj[i].push(j+1);if(doc.kind==='graph'){matrix[j][i]=1;adj[j].push(i+1);}}
+  return{matrix,adj:adj.map(a=>a.sort((a,b)=>a-b))};
+}
+function hashBuckets(doc) {
+  const slots=Array.from({length:doc.capacity},()=>[]);
+  for(const key of doc.values){let j=doc.kind==='direct'?key:((key%doc.capacity)+doc.capacity)%doc.capacity;if(doc.kind==='open')while(slots[j].length)j=(j+1)%doc.capacity;slots[j].push(key);}
+  return slots;
+}
+function readStructureFile(text) {
+  if(typeof text!=='string'||text.length>500000)throw Error('Open a structure file smaller than 500 KB.');
+  let file;try{file=JSON.parse(text);}catch{throw Error('The file is not valid JSON.');}
+  if(file?.format!=='ads-structures'||file.version!==1||!Array.isArray(file.structures)||file.structures.length>30)throw Error('Choose an ADS structures file (version 1, at most 30 structures).');
+  return file.structures.map(validateStructure);
+}
+function writeStructureFile(structures) {
+  if(!Array.isArray(structures)||structures.length>30)throw Error('Store at most 30 structures.');
+  return JSON.stringify({format:'ads-structures',version:1,structures:structures.map(validateStructure)},null,2);
+}
+
+function escapeStructure(value){return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));}
+function renderStructure(doc,{runtimeBalances=false}={}){
+  const type=structureType(doc.kind),{metrics}=analyseStructure(doc),parts=[];
+  let width=900,height=280;
+  const text=(x,y,value,size=16)=>`<text x="${x}" y="${y}" font-size="${size}" text-anchor="middle">${escapeStructure(value)}</text>`;
+  const box=(x,y,w,h,label)=>`<rect x="${x}" y="${y}" width="${w}" height="${h}" rx="2" fill="white" stroke="#263b32"/>${text(x+w/2,y+h/2+6,label)}`;
+  const arrow=(x1,y1,x2,y2,label='',dashed=false)=>`<path d="M ${x1} ${y1} L ${x2} ${y2}" fill="none" stroke="#607c70" ${dashed?'stroke-dasharray="5 3"':''} marker-end="url(#ds-arrow)"/>${label?text((x1+x2)/2,(y1+y2)/2-9,label,11):''}`;
+  if(type.family==='linear'||type.family==='list'){
+    const values=doc.values;
+    if(['set','sequence'].includes(doc.kind)){
+      width=Math.max(700,values.length*85);parts.push(text(width/2,115,`${doc.name} = ${doc.kind==='set'?'{':'⟨'} ${values.join(', ')} ${doc.kind==='set'?'}':'⟩'}`,22));
+    }else if(type.family==='list'){
+      const header=['h1l','c2l'].includes(doc.kind),trailer=doc.kind==='t1l',cyclic=['c1l','c2l'].includes(doc.kind),doubly=['s2l','c2l'].includes(doc.kind);
+      const entries=[...(header?['H']:[]),...values,...(trailer?['T']:[])];
+      width=Math.max(750,entries.length*132+150);height=320;
+      parts.push(text(60,155,doc.name));
+      if(entries.length)parts.push(arrow(85,150,120,150));else parts.push(text(140,155,'∅'));
+      entries.forEach((value,i)=>{
+        const x=120+i*132;parts.push(box(x,120,96,60,value));parts.push(text(x+48,105,header&&i===0?'H':trailer&&i===entries.length-1?'T':'p'+(i+(header?0:1)),12));
+        if(i<entries.length-1){parts.push(arrow(x+96,140,x+132,140,'next'));if(doubly)parts.push(arrow(x+132,170,x+96,170,'prev'));}
+      });
+      if(entries.length){const end=120+(entries.length-1)*132+96;
+        if(cyclic){parts.push(`<path d="M ${end} 150 L ${end+25} 150 L ${end+25} 230 L 145 230 L 145 185" fill="none" stroke="#607c70" marker-end="url(#ds-arrow)"/>`);parts.push(text(width/2,250,'next → '+(header?'H':entries.length?'p1':'∅'),13));if(doubly)parts.push(text(width/2,280,'H→prev → '+(values.length?'p'+values.length:'H'),13));}
+        else{parts.push(arrow(end,150,end+35,150));parts.push(text(end+55,155,'∅'));if(doubly)parts.push(text(155,205,'prev = ∅',12));}
+      }
+    }else{
+      const storage=['stack','queue','heap'].includes(doc.kind),count=storage?doc.capacity:values.length;
+      width=Math.max(750,count*78+100);height=doc.kind==='stack'?Math.max(300,count*55+100):280;
+      parts.push(text(65,85,doc.kind==='queue'?'Z':'A',20));
+      for(let i=0;i<count;i++){
+        const logical=doc.kind==='queue'?(i-doc.start+doc.capacity)%doc.capacity:i;
+        const value=logical<values.length?values[logical]:'·';
+        const x=doc.kind==='stack'?140:80+i*78,y=doc.kind==='stack'?65+(count-1-i)*55:110;
+        parts.push(box(x,y,70,48,value).replace('<rect ','<rect data-array-index="'+i+'" '),text(x+35,y-8,i,12));
+        if(doc.kind==='stack'&&i===values.length-1)parts.push(text(x+140,y+30,'← top',14));
+        if(doc.kind==='queue'&&i===doc.start)parts.push(text(x+35,y+75,'↑ k',13));
+      }
+      if(!count)parts.push(text(300,140,'Empty array · length = 0'));
+      parts.push(text(width/2,height-22,`n = ${values.length}${storage?' · capacity = '+doc.capacity:''}${doc.kind==='queue'?' · k = '+doc.start:''}`));
+      if(doc.kind==='heap'){
+        const positions=values.map((_,i)=>{const depth=Math.floor(Math.log2(i+1)),slot=i-(2**depth-1),slots=2**depth;return{x:width*(slot+0.5)/slots,y:250+depth*85};});
+        for(let i=1;i<values.length;i++){const p=positions[Math.floor((i-1)/2)],q=positions[i];parts.push(arrow(p.x,p.y+18,q.x,q.y-20));}
+        positions.forEach((p,i)=>parts.push(`<circle cx="${p.x}" cy="${p.y}" r="23" fill="white" stroke="#263b32"/>`,text(p.x,p.y+6,values[i]),text(p.x,p.y+42,`A[${i}]`,11)));
+        height=values.length?positions.at(-1).y+80:300;
+      }
+    }
+  }else if(type.family==='hash'){
+    const buckets=hashBuckets(doc);width=Math.max(760,...buckets.map(b=>b.length*100+220));height=Math.max(280,doc.capacity*54+110);
+    buckets.forEach((bucket,i)=>{const y=80+i*54;parts.push(text(45,y+27,i,13),box(75,y,65,42,bucket.length&&doc.kind!=='chain'?bucket[0]:bucket.length?'→':doc.kind==='open'?'E':'∅'));
+      if(doc.kind==='chain')bucket.forEach((key,j)=>{const x=185+j*100;parts.push(arrow(x-45,y+21,x-3,y+21),box(x,y,75,42,key));if(j===bucket.length-1)parts.push(text(x+100,y+27,'∅'));});
+    });
+  }else if(type.family==='tree'){
+    const byId=new Map(doc.nodes.map(n=>[n.id,n])),positions=new Map(),seen=new Set();let leaf=0,maxDepth=0;
+    function layout(id,depth){if(!id||seen.has(id))return;seen.add(id);maxDepth=Math.max(maxDepth,depth);const node=byId.get(id);
+      const children=doc.kind==='general'?[node.firstChild,node.nextSibling]:doc.kind==='bplus'?node.children:[node.left,node.right];
+      const before=leaf;children.filter(Boolean).forEach(child=>layout(child,depth+1));if(leaf===before)leaf++;
+      positions.set(id,{x:(before+leaf)/2*155+55,y:100+depth*110});
+    }
+    layout(doc.root,0);doc.nodes.forEach(n=>{if(!seen.has(n.id))layout(n.id,0);});width=Math.max(750,leaf*155+110);height=Math.max(280,maxDepth*110+210);
+    for(const n of doc.nodes){const p=positions.get(n.id),refs=doc.kind==='general'?[[n.firstChild,'firstChild'],[n.nextSibling,'nextSibling']]:doc.kind==='bplus'?n.children.map((id,i)=>[id,'c'+i]):[[n.left,'left'],[n.right,'right']];
+      refs.forEach(([id,label])=>{if(id){const q=positions.get(id);parts.push(arrow(p.x,p.y+22,q.x,q.y-25,label,label==='nextSibling'));}else if(doc.kind!=='bplus')parts.push(text(p.x+(label==='left'||label==='firstChild'?-33:33),p.y+52,'∅',12));});
+      if(doc.kind==='bplus'&&n.next){const q=positions.get(n.next);parts.push(arrow(p.x+45,p.y,q.x-45,q.y,'next',true));}
+    }
+    for(const n of doc.nodes){const p=positions.get(n.id);
+      if(doc.kind==='bplus'){const w=Math.max(90,n.keys.length*35);parts.push(box(p.x-w/2,p.y-24,w,48,n.keys.join(' | ')||'∅'));}
+      else parts.push(`<circle data-node-id="${escapeStructure(n.id)}" cx="${p.x}" cy="${p.y}" r="26" fill="white" stroke="#263b32"/>`,text(p.x,p.y+6,n.key));
+      parts.push(text(p.x,p.y-38,n.id===doc.root?`${n.id} ← ${doc.name}`:n.id,12));
+      if(doc.kind==='avl'&&(n.left||n.right)){const b=runtimeBalances?(n.b??0):(metrics[n.id]?.balance??0);parts.push(text(p.x+43,p.y+5,b===0?'◦':b===1?'+':b===-1?'−':b===2?'++':b===-2?'−−':b,15));}
+    }
+    if(!doc.nodes.length)parts.push(text(250,130,`${doc.name} = ∅`));
+  }else{
+    const n=doc.nodes.length;const radius=Math.max(110,n*13);width=Math.max(760,radius*2+160);height=Math.max(350,radius*2+150);
+    const positions=doc.nodes.map((_,i)=>({x:width/2+radius*Math.cos(i*2*Math.PI/n-Math.PI/2),y:height/2+radius*Math.sin(i*2*Math.PI/n-Math.PI/2)}));
+    for(const edge of doc.edges){const p=positions[doc.nodes.findIndex(n=>n.id===edge.from)],q=positions[doc.nodes.findIndex(n=>n.id===edge.to)],angle=Math.atan2(q.y-p.y,q.x-p.x);parts.push(`<line x1="${p.x+27*Math.cos(angle)}" y1="${p.y+27*Math.sin(angle)}" x2="${q.x-29*Math.cos(angle)}" y2="${q.y-29*Math.sin(angle)}" stroke="#607c70" ${doc.kind==='digraph'?'marker-end="url(#ds-arrow)"':''}/>`);}
+    positions.forEach((p,i)=>parts.push(`<circle cx="${p.x}" cy="${p.y}" r="25" fill="white" stroke="#263b32"/>`,text(p.x,p.y+6,doc.nodes[i].key),text(p.x,p.y+45,`v${i+1} · ${doc.nodes[i].id}`,11)));
+    if(!n)parts.push(text(width/2,height/2,'G.V = {} · G.E = {}'));
+  }
+  const title=`${doc.name} · ${type.label}`;
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}" viewBox="0 0 ${width} ${height}" role="img" aria-label="${escapeStructure(title)}"><title>${escapeStructure(title)}</title><defs><marker id="ds-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M 0 0 L 10 5 L 0 10 z" fill="#607c70"/></marker></defs><rect width="100%" height="100%" fill="white"/><g font-family="Georgia,serif" fill="#263b32">${text(width/2,35,title,20)}${parts.join('')}</g></svg>`;
+}
+function structureNotation(doc){
+  const type=structureType(doc.kind),out=[`${doc.name} : ${type.label}`];
+  if(type.family==='list'){
+    const header=['h1l','c2l'].includes(doc.kind),trailer=doc.kind==='t1l',cyclic=['c1l','c2l'].includes(doc.kind),two=['s2l','c2l'].includes(doc.kind),n=doc.values.length;
+    out.push(`${doc.name} → ${header?'H':n?'p1':trailer?'T':'∅'}`);
+    if(header)out.push(`H→next = ${n?'p1':doc.kind==='c2l'?'H':'∅'}`);
+    doc.values.forEach((v,i)=>out.push(`p${i+1}→key = ${JSON.stringify(v)}; next = ${i+1<n?'p'+(i+2):cyclic?header?'H':'p1':trailer?'T':'∅'}${two?'; prev = '+(i?'p'+i:header?'H':'∅'):''}`));
+    if(doc.kind==='c2l')out.push(`H→prev = ${n?'p'+n:'H'}`);if(trailer)out.push('T→next = ∅; T→key is undefined');
+  }else if(type.family==='tree'){
+    out.push(`${doc.name} = ${doc.root||'∅'}`);
+    const {metrics}=analyseStructure(doc);
+    for(const n of doc.nodes)out.push(doc.kind==='general'?`${n.id}→key = ${JSON.stringify(n.key)}; firstChild = ${n.firstChild||'∅'}; nextSibling = ${n.nextSibling||'∅'}`:doc.kind==='bplus'?`${n.id}: keys = [${n.keys.join(', ')}]; children = [${n.children.join(', ')}]; next = ${n.next||'∅'}`:`${n.id}→key = ${JSON.stringify(n.key)}; left = ${n.left||'∅'}; right = ${n.right||'∅'}${doc.kind==='avl'?'; b = '+(metrics[n.id]?.balance??'?'):''}`);
+    if(doc.kind==='avl')out.push('h(∅) = −1; p→b = h(p→right) − h(p→left)');
+  }else if(type.family==='graph'){
+    const {adj}=graphRepresentations(doc);out.push(`G.V = {${doc.nodes.map((n,i)=>`v${i+1}=${JSON.stringify(n.key)}`).join(', ')}}`);
+    adj.forEach((a,i)=>out.push(`A[${i+1}] → ${a.map(j=>'v = '+j).join(' → ')}${a.length?' → ':''}∅`));out.push('A/1 : Edge*[n]; Edge { v : N; next : Edge* }');
+  }else if(type.family==='hash'){
+    out.push(`T[0..${doc.capacity}) · m = ${doc.capacity} · n = ${doc.values.length}`,doc.kind==='direct'?'T[k] stores key k':`h(k) = ((k mod m) + m) mod m${doc.kind==='open'?'; linear probing h(k,i) = (h(k) + i) mod m':''}`);
+    hashBuckets(doc).forEach((b,i)=>out.push(`T[${i}] = ${b.length?b.join(' → ')+(doc.kind==='chain'?' → ∅':''):doc.kind==='open'?'E':'∅'}`));
+    if(doc.kind==='open')out.push('E = empty. Editing the value list rebuilds the table; this editor rebuilds layouts rather than performing in-place D-marker deletion.');
+  }else{
+    const stored=doc.kind==='queue'?Array.from({length:doc.capacity},(_,i)=>{const logical=(i-doc.start+doc.capacity)%doc.capacity;return logical<doc.values.length?JSON.stringify(doc.values[logical]):'·';}):doc.values.map(v=>JSON.stringify(v));
+    out.push(`${doc.kind==='queue'?'Z':'A'} = [${stored.join(', ')}]`, `n = ${doc.values.length}`);
+    if(doc.kind==='stack')out.push(`top = ${doc.values.length?'A['+(doc.values.length-1)+']':'∅'}; A.length = ${doc.capacity}`);
+    if(doc.kind==='queue')out.push(`Z.length = ${doc.capacity}; k = ${doc.start}; logical items: ⟨Z[k], Z[(k+1) mod Z.length], …⟩`);
+    if(doc.kind==='heap')out.push('left(i) = 2i+1; right(i) = 2i+2; parent(j) = ⌊(j−1)/2⌋; parent key ≥ child keys');
+    if(doc.kind==='set')out.push(`${doc.name} = {${doc.values.join(', ')}}`);
+    if(doc.kind==='sequence')out.push(`${doc.name} = ⟨${doc.values.join(', ')}⟩; indices start at 1`);
+  }
+  return out.join('\n');
+}
+
+// A small explicit grammar. User text is never passed to JavaScript evaluation.
+class ExecutionError extends Error {
+  constructor(message, line = 0) { super(message); this.name = 'ExecutionError'; this.line = line; }
+}
+function executionExpression(source) {
+  if (source.length > 3000) throw new ExecutionError('Expression is too long.');
+  const input = source.replace(/->/g, '→').replace(/!=|<>/g, '≠').replace(/<=/g, '≤').replace(/>=/g, '≥').replace(/&&/g, '∧').replace(/\|\|/g, '∨');
+  const tokens = []; let pos = 0;
+  while (pos < input.length) {
+    if (/\s/u.test(input[pos])) { pos++; continue; }
+    const tail = input.slice(pos);
+    const number = tail.match(/^(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?/i);
+    if (number) { const value = Number(number[0]); if (!Number.isFinite(value)) throw new ExecutionError('Number is outside the finite range.'); tokens.push({ kind: 'number', value }); pos += number[0].length; }
+    else if (input[pos] === '"' || input[pos] === "'") {
+      const quote = input[pos++]; let value = '', closed = false;
+      while (pos < input.length) { let ch = input[pos++]; if (ch === quote) { closed = true; break; } if (ch === '\\') { ch = input[pos++]; if (!['n','t','\\','"',"'"].includes(ch)) throw new ExecutionError('Unsupported string escape.'); ch = ch === 'n' ? '\n' : ch === 't' ? '\t' : ch; } value += ch; }
+      if (!closed || value.length > 200) throw new ExecutionError('Invalid or oversized string.');
+      tokens.push({ kind: 'string', value });
+    } else {
+      const id = tail.match(/^[\p{L}_][\p{L}\p{N}_]*/u);
+      if (id) { const word = id[0]; tokens.push({ kind: ['and','or','not','mod','div'].includes(word) ? 'op' : 'id', value: ({ and:'∧',or:'∨',not:'¬' })[word] || word }); pos += word.length; }
+      else if ('+-−*/%=≠<>≤≥∧∨¬!(),[].→∞∅⌊⌋⌈⌉'.includes(input[pos])) tokens.push({ kind:'op',value:input[pos++] === '−' ? '-' : input[pos-1] });
+      else throw new ExecutionError(`Unsupported expression character: ${input[pos]}`);
+    }
+    if (tokens.length > 600) throw new ExecutionError('Expression has too many tokens.');
+  }
+  tokens.push({ kind:'end',value:'' }); let i = 0, depth = 0;
+  const peek = () => tokens[i].value;
+  const take = value => { if (peek() !== value) throw new ExecutionError(`Expected ${value}, found ${peek() || 'end of expression'}.`); i++; };
+  const precedence = { '∨':1,'∧':2,'=':3,'≠':3,'<':3,'>':3,'≤':3,'≥':3,'+':4,'-':4,'*':5,'/':5,'%':5,mod:5,div:5 };
+  function read(min = 0) {
+    if (++depth > 48) throw new ExecutionError('Expression is nested too deeply.');
+    const token = tokens[i++]; let node;
+    if (token.kind === 'number' || token.kind === 'string') node = { kind:'literal',value:token.value };
+    else if (['∞','∅'].includes(token.value)) node = { kind:'literal',value:token.value === '∞' ? Infinity : null };
+    else if (['true','false','NULL','null'].includes(token.value)) node = { kind:'literal',value:token.value === 'true' ? true : token.value === 'false' ? false : null };
+    else if (['-','+','¬','!'].includes(token.value)) node = { kind:'unary',op:token.value,arg:read(6) };
+    else if (token.value === '(') { node = read(); take(')'); }
+    else if (['⌊','⌈'].includes(token.value)) { node = { kind:'round',op:token.value,arg:read() }; take(token.value === '⌊' ? '⌋' : '⌉'); }
+    else if (token.kind === 'id') {
+      if (token.value === 'new') { const name = tokens[i++]; if (name.value !== 'Node') throw new ExecutionError('Only new Node(key) is supported.'); take('('); const arg = read(); take(')'); node = { kind:'new-node',arg }; }
+      else node = { kind:'name',name:token.value };
+    } else throw new ExecutionError(`Expected a value, found ${token.value || 'end of expression'}.`);
+    while (true) {
+      if (peek() === '.' || peek() === '→') { i++; const name = tokens[i++]; if (name.kind !== 'id') throw new ExecutionError('A field name must follow the pointer or dot.'); node = { kind:'field',object:node,name:name.value }; }
+      else if (peek() === '[') { i++; const index = read(); take(']'); node = { kind:'index',object:node,index }; }
+      else if (peek() === '(') { i++; const args = []; if (peek() !== ')') { do { if (args.length) take(','); args.push(read()); } while (peek() === ','); } take(')'); node = { kind:'call',target:node,args }; }
+      else { const power = precedence[peek()]; if (!power || power < min) break; const op = tokens[i++].value; node = { kind:'binary',op,left:node,right:read(power+1) }; }
+    }
+    depth--; return node;
+  }
+  const tree = read(); if (tokens[i].kind !== 'end') throw new ExecutionError(`Unexpected token ${peek()}.`); return tree;
+}
+function splitExecutionStatements(source) {
+  const result = []; let start = 0, level = 0, quote = '', escaped = false;
+  for (let i=0;i<source.length;i++) { const c=source[i]; if(quote){if(escaped)escaped=false;else if(c==='\\')escaped=true;else if(c===quote)quote='';continue;}if(c==='"'||c==="'"){quote=c;continue;}if(c==='('||c==='[')level++;if(c===')'||c===']')level--;if(c===';'&&level===0){result.push(source.slice(start,i).trim());start=i+1;} }
+  result.push(source.slice(start).trim()); return result.filter(Boolean);
+}
+function executionSignature(signature) {
+  const match = signature.match(/^([\p{L}_][\p{L}\p{N}_:]*)\s*\((.*)\)\s*(?::.*)?$/u);
+  if (!match) throw new ExecutionError('Unsupported routine signature.');
+  const params = []; let type = '';
+  for (const group of match[2].split(';').filter(s=>s.trim())) {
+    const colon = group.indexOf(':'); if (colon < 0) throw new ExecutionError('Parameters need a declared type.');
+    type = group.slice(colon+1).trim();
+    for (const raw of group.slice(0,colon).split(',')) { const name = raw.trim().replace(/^&/, ''); if (!/^[\p{L}_][\p{L}\p{N}_]*$/u.test(name)) throw new ExecutionError('Unsupported parameter name.'); if(params.some(p=>p.name===name))throw new ExecutionError('Duplicate parameter name.'); params.push({name,type,reference:raw.trim().startsWith('&')}); }
+  }
+  return { name:match[1],params };
+}
+function compileExecution(routines, source) {
+  const lines=source.replace(/\r\n?/g,'\n').split('\n');
+  const expr = (text,line) => { try { return executionExpression(text); } catch(error){error.line=line;throw error;} };
+  function statement(text,line) {
+    if (text === 'SKIP' || text.startsWith('//')) return { kind:'skip' };
+    if (/^return(?:\s|$)/.test(text)) return { kind:'return',value:text.slice(6).trim()?expr(text.slice(6).trim(),line):null };
+    const assignment = text.match(/^(.*?)\s*:=\s*(.+)$/u);
+    if (assignment) return { kind:'assign',target:expr(assignment[1],line),value:expr(assignment[2],line) };
+    const inc=text.match(/^(.*?)\s*(\+\+|--)$/);if(inc)return{kind:'increment',target:expr(inc[1],line),delta:inc[2]==='++'?1:-1};
+    const declaration=text.match(/^([\p{L}_][\p{L}\p{N}_]*(?:\s*,\s*[\p{L}_][\p{L}\p{N}_]*)*)\s*:\s*(.+)$/u);
+    if(declaration){const type=declaration[2].trim();if(!/^(?:Queue|Stack|PrQueue)(?:\(.*\))?$|^(?:[A-Za-z]+\*?|[A-Za-z]+\[.*\])$/.test(type))throw new ExecutionError('Unsupported declaration type.',line);return{kind:'declare',names:declaration[1].split(',').map(s=>s.trim()),type};}
+    const call=expr(text,line);if(call.kind!=='call')throw new ExecutionError('Use an assignment, declaration, return, SKIP or supported procedure call.',line);return{kind:'call',value:call};
+  }
+  function body(nodes){return nodes.map(node=>{const result={...node};
+    if(node.type==='statement')result.commands=(node.text.startsWith('//')?[node.text]:splitExecutionStatements(node.text)).map(text=>({text,...statement(text,node.line)}));
+    else if(node.type==='if'){result.condition=expr(node.text,node.line);result.yes=body(node.yes);result.no=body(node.no);}
+    else if(node.type==='select'){result.branches=node.branches.map(b=>({...b,condition:b.text==='otherwise'?null:expr(b.text,b.line),body:body(b.body)}));}
+    else{
+      const raw=lines[node.line-1].trim();result.body=body(node.body);
+      if(/^while\s/.test(raw)){result.loopKind='while';result.condition=expr(node.text,node.line);}
+      else{
+        const each=node.text.replace(/^∀/,'').match(/^([\p{L}_][\p{L}\p{N}_]*)\s+(?:∈|in)\s+(.+)$/u);
+        const range=node.text.match(/^([\p{L}_][\p{L}\p{N}_]*)\s*:=\s*(.+?)\s+(to|downto)\s+(.+)$/u);
+        if(each){result.loopKind='each';result.variable=each[1];result.collection=expr(each[2],node.line);}
+        else if(range){result.loopKind='range';result.variable=range[1];result.from=expr(range[2],node.line);result.to=expr(range[4],node.line);result.delta=range[3]==='to'?1:-1;}
+        else throw new ExecutionError('For loops support collection membership or inclusive to/downto ranges.',node.line);
+      }
+    }
+    return result;
+  });}
+  const compiled=routines.map(r=>({...r,...executionSignature(r.signature),body:body(r.body)}));
+  if(new Set(compiled.map(r=>r.name)).size!==compiled.length)throw new ExecutionError('Routine names must be unique.');
+  return compiled;
+}
+
+
+const executionUninitialized = Symbol('uninitialized');
+
+class ExecutionSession {
+  constructor(source, entryName, bindings = {}, { maxSteps = 10000 } = {}) {
+    this.routines = compileExecution(parse(source), source);
+    this.entry = this.routines.find(r => r.name === entryName);
+    if (!this.entry) throw new ExecutionError('Choose a routine to execute.');
+    this.maxSteps = Math.max(1, Math.min(20000, maxSteps));
+    this.steps = 0; this.operations = 0; this.line = this.entry.line; this.frames = [];
+    this.origins = []; this.output = []; this.activeNodes = new Set(); this.activeIndices = new Set();
+    this.activeEdge = null; this.lastVertex = null; this.result = undefined; this.done = false; this.error = null;
+    this.bindings = new Map();
+    // Structures are copied before binding scalars/vertices, so references share their graph.
+    for (const parameter of this.entry.params) {
+      const binding = bindings[parameter.name];
+      if (binding && typeof binding === 'object' && binding.structure) this.bindings.set(parameter.name, this.loadStructure(binding.structure, parameter.name, parameter.type));
+    }
+    for (const parameter of this.entry.params) {
+      if (this.bindings.has(parameter.name)) continue;
+      const binding = bindings[parameter.name];
+      if (binding && typeof binding === 'object' && binding.vertex) {
+        const graph = this.bindings.get(binding.graphParam);
+        const vertex = graph?.tag === 'graph' ? graph.vertices.find(v => v.id === binding.vertex) : null;
+        if (!vertex) throw new ExecutionError(`Choose a vertex from the graph bound to ${binding.graphParam}.`);
+        this.bindings.set(parameter.name, vertex);
+      } else if (binding === null || typeof binding === 'string' || typeof binding === 'boolean' || (typeof binding === 'number' && Number.isFinite(binding))) this.bindings.set(parameter.name, binding);
+      else throw new ExecutionError(`Bind a value or structure to ${parameter.name}.`);
+    }
+    this.iterator = this.program();
+  }
+  loadStructure(input, parameter, declaredType = '') {
+    const doc = validateStructure(input), family = structureType(doc.kind).family;
+    const origin = { doc, parameter, nodes:[], root:null, value:null };
+    const node = (id,key,tag='node') => ({ tag,id,key,origin,left:null,right:null,firstChild:null,nextSibling:null,next:null,prev:null,parent:null,b:0,d:Infinity,pi:null,color:'white' });
+    if (family === 'graph') {
+      origin.nodes = doc.nodes.map((n,i) => ({...node(n.id,n.key,'vertex'),index:i+1,initialized:new Set()}));
+      const graph = {tag:'graph',origin,vertices:origin.nodes,adj:new Map(origin.nodes.map(n=>[n,[]]))};
+      for (const edge of doc.edges) { const a=origin.nodes.find(n=>n.id===edge.from),b=origin.nodes.find(n=>n.id===edge.to);graph.adj.get(a).push(b);if(doc.kind==='graph')graph.adj.get(b).push(a); }
+      for(const neighbours of graph.adj.values())neighbours.sort((a,b)=>a.index-b.index);
+      origin.value=graph;
+    } else if (family === 'tree') {
+      origin.nodes = doc.nodes.map(n => ({...node(n.id,n.key),keys:[...n.keys],children:[]}));
+      const map=new Map(origin.nodes.map(n=>[n.id,n]));
+      for(const source of doc.nodes){const n=map.get(source.id);for(const field of ['left','right','firstChild','nextSibling','next'])n[field]=map.get(source[field])||null;n.children=source.children.map(id=>map.get(id));for(const child of [n.left,n.right,...n.children])if(child)child.parent=n;}
+      origin.root=map.get(doc.root)||null;origin.value=origin.root;
+    } else if (family === 'list') {
+      origin.nodes=doc.values.map((key,i)=>node('p'+(i+1),key));
+      const header=['h1l','c2l'].includes(doc.kind)?node('H','H'):null;
+      const trailer=doc.kind==='t1l'?node('T','T'):null;
+      const list=[...(header?[header]:[]),...origin.nodes,...(trailer?[trailer]:[])];
+      list.forEach((n,i)=>{n.next=list[i+1]||(['c1l','c2l'].includes(doc.kind)?list[0]||null:null);n.prev=i?list[i-1]:doc.kind==='c2l'?list.at(-1):null;});
+      origin.nodes=list;origin.root=header||origin.nodes[0]||trailer;origin.value=origin.root;
+    } else if (doc.kind==='heap'&&declaredType.includes('[')) {
+      origin.value={tag:'array',values:[...doc.values],base:0,origin};
+    } else if (['stack','queue','heap'].includes(doc.kind)) {
+      origin.value={tag:'queue',kind:doc.kind,items:[...doc.values],capacity:doc.capacity,start:doc.start,origin};
+    } else if (family==='hash') {
+      const buckets=hashBuckets(doc);
+      const values=buckets.map((bucket,i)=>{
+        if(doc.kind!=='chain')return bucket[0]??(doc.kind==='open'?'E':null);
+        let head=null;for(let j=bucket.length-1;j>=0;j--){const n=node('h'+i+'_'+j,bucket[j]);n.next=head;head=n;origin.nodes.push(n);}return head;
+      });origin.value={tag:'array',values,base:0,origin};
+    } else origin.value={tag:doc.kind==='set'?'collection':'array',values:[...doc.values],base:doc.kind==='sequence'?1:0,origin};
+    this.origins.push(origin); return origin.value;
+  }
+  fail(message) { throw new ExecutionError(message,this.line); }
+  charge() { if(++this.operations>1000000)this.fail('Operation limit reached. Check for non-termination.'); }
+  cell(value,origin=value?.origin) { return {origin,peek:()=>value,get:()=>{if(value===executionUninitialized)this.fail('Read of an uninitialized local variable.');return value;},set:next=>{value=next;}}; }
+  lookup(env,name) { if(!env.has(name))this.fail(`Unknown variable ${name}.`);return env.get(name).get(); }
+  touch(value) { if(value?.tag==='node'||value?.tag==='vertex')this.activeNodes.add(value);return value; }
+  numeric(value) { if(typeof value!=='number'||Number.isNaN(value))this.fail('A numeric value is required.');return value; }
+  finite(value) { this.numeric(value);if(!Number.isFinite(value))this.fail('A finite numeric value is required.');return value; }
+  scalar(value) { if(value!==null&&!['number','string','boolean'].includes(typeof value))this.fail('Expected a scalar value.');return value; }
+  noteVertex(value) {
+    if(value?.tag!=='vertex')return;
+    if(this.lastVertex&&this.lastVertex!==value&&this.lastVertex.origin===value.origin){const graph=value.origin.value;if(graph.adj.get(this.lastVertex).includes(value))this.activeEdge={origin:value.origin,from:this.lastVertex.id,to:value.id};}
+    this.touch(value);
+  }
+  *evaluate(ast,env) {
+    this.charge();
+    if(ast.kind==='literal')return ast.value;
+    if(ast.kind==='name'){
+      if(['white','gray','grey','black','E','D'].includes(ast.name)&&!env.has(ast.name))return ast.name;
+      return this.touch(this.lookup(env,ast.name));
+    }
+    if(ast.kind==='unary'){const arg=yield* this.evaluate(ast.arg,env);return ast.op==='¬'||ast.op==='!'?!Boolean(arg):ast.op==='-'?-this.numeric(arg):this.numeric(arg);}
+    if(ast.kind==='round'){const value=this.finite(yield* this.evaluate(ast.arg,env));return ast.op==='⌊'?Math.floor(value):Math.ceil(value);}
+    if(ast.kind==='binary'){
+      const a=yield* this.evaluate(ast.left,env);
+      if(ast.op==='∧'&&!a)return false;if(ast.op==='∨'&&a)return true;
+      const b=yield* this.evaluate(ast.right,env);
+      if(ast.op==='∧'||ast.op==='∨')return Boolean(b);
+      if(ast.op==='=')return a===b;if(ast.op==='≠')return a!==b;
+      if(['<','>','≤','≥'].includes(ast.op)){if(typeof a!==typeof b||!['number','string'].includes(typeof a))this.fail('Compare two numbers or two strings.');return ast.op==='<'?a<b:ast.op==='>'?a>b:ast.op==='≤'?a<=b:a>=b;}
+      this.numeric(a);this.numeric(b);
+      if(['/', '%','mod','div'].includes(ast.op)&&b===0)this.fail('Division by zero.');
+      const value=ast.op==='+'?a+b:ast.op==='-'?a-b:ast.op==='*'?a*b:ast.op==='/'?a/b:ast.op==='div'?Math.floor(a/b):ast.op==='mod'?a-Math.floor(a/b)*b:a%b;
+      if(Number.isNaN(value))this.fail('Undefined numeric result.');return value;
+    }
+    if(ast.kind==='field'||ast.kind==='index')return (yield* this.reference(ast,env,false)).get();
+    if(ast.kind==='new-node'){
+      const key=this.scalar(yield* this.evaluate(ast.arg,env));const contextual=[...env.values()].map(cell=>cell.origin||(cell.peek?cell.peek():cell.get())?.origin).find(o=>o&&structureType(o.doc.kind).family==='tree');const trees=this.origins.filter(o=>structureType(o.doc.kind).family==='tree');const origin=contextual||(trees.length===1?trees[0]:null);
+      if(!origin)this.fail('new Node needs a bound tree.');if(origin.nodes.length>=128)this.fail('Runtime node limit reached (128).');
+      const id='r'+(origin.nodes.length+1);const value={tag:'node',id,key,origin,left:null,right:null,parent:null,firstChild:null,nextSibling:null,next:null,prev:null,b:0,d:Infinity,pi:null,color:'white',keys:[],children:[]};origin.nodes.push(value);this.touch(value);return value;
+    }
+    if(ast.kind==='call')return yield* this.callExpression(ast,env);
+    this.fail('Unsupported expression.');
+  }
+  *reference(ast,env,create=true) {
+    if(ast.kind==='name') { if(!env.has(ast.name)){if(!create)this.fail(`Unknown variable ${ast.name}.`);env.set(ast.name,this.cell(0));}return env.get(ast.name); }
+    if(ast.kind==='call'&&ast.target.kind==='name'&&['d','π','pi','color'].includes(ast.target.name)){
+      if(ast.args.length!==1)this.fail('Vertex attributes need one vertex argument.');
+      const vertex=yield* this.evaluate(ast.args[0],env);if(vertex?.tag!=='vertex')this.fail('d(v), π(v) and color(v) need a graph vertex.');
+      const field=['π','pi'].includes(ast.target.name)?'pi':ast.target.name;return{get:()=>{if(!vertex.initialized.has(field))this.fail(`${field}(${vertex.id}) has not been initialized.`);return vertex[field];},set:value=>{if(field==='d')this.numeric(value);if(field==='pi'&&value?.origin&&value.origin!==vertex.origin)this.fail('A predecessor must belong to the same graph.');if(field==='pi'&&value!==null&&value?.tag!=='vertex')this.fail('π(v) must be ∅ or a vertex.');if(field==='color'&&typeof value!=='string')this.fail('A color must be text.');vertex[field]=value;vertex.initialized.add(field);this.noteVertex(vertex);}};
+    }
+    if(ast.kind==='index'){
+      const array=yield* this.evaluate(ast.object,env),index=this.finite(yield* this.evaluate(ast.index,env));
+      if(array?.tag!=='array'&&array?.tag!=='collection')this.fail('Only a bound array or sequence supports indexing.');
+      const i=index-(array.base||0);if(!Number.isInteger(i)||i<0||i>=array.values.length)this.fail(`Index ${index} is outside ${array.base||0}..${(array.base||0)+array.values.length-1}.`);
+      this.activeIndices.add((array.origin?.parameter||'array')+':'+i);
+      return{peek:()=>array.values[i],get:()=>{if(array.values[i]===executionUninitialized)this.fail(`Array index ${index} has not been initialized.`);return this.touch(array.values[i]);},set:value=>{if(value&&typeof value==='object'&&!['node','vertex'].includes(value.tag))this.fail('Array cells support scalar values or node references, not nested containers.');array.values[i]=value;}};
+    }
+    if(ast.kind==='field'){
+      const object=yield* this.evaluate(ast.object,env),field=ast.name==='π'?'pi':ast.name;
+      if(object===null)this.fail(`Cannot read ${field} through ∅.`);
+      if(object?.tag==='node'||object?.tag==='vertex'){
+        if(!['key','left','right','parent','firstChild','nextSibling','next','prev','b','d','pi','color','index'].includes(field))this.fail(`Unsupported node field ${field}.`);
+        this.touch(object);return{origin:object.origin,peek:()=>object[field]??null,get:()=>{if(object.tag==='vertex'&&['d','pi','color'].includes(field)&&!object.initialized.has(field))this.fail(`${object.id}→${field} has not been initialized.`);return object[field]??null;},set:value=>{
+          if(['left','right','parent','firstChild','nextSibling','next','prev','pi'].includes(field)&&value!==null&&!['node','vertex'].includes(value?.tag))this.fail('A pointer must be ∅ or a node.');
+          if(field==='index')this.fail('Vertex indices are read-only.');if(['left','right','parent','firstChild','nextSibling','next','prev','pi'].includes(field)&&value?.origin&&value.origin!==object.origin)this.fail('Cross-structure pointers are not supported in this runner yet.');if(field==='key')this.scalar(value);if(['b','d'].includes(field))this.numeric(value);if(field==='color'&&typeof value!=='string')this.fail('A color must be text.');object[field]=value;if(object.tag==='vertex')object.initialized.add(field);
+        }};
+      }
+      let value;
+      if((object?.tag==='array'||object?.tag==='collection')&&field==='length')value=object.values.length;
+      else if(object?.tag==='graph'&&field==='V')value={tag:'collection',values:object.vertices,base:1};
+      else if(object?.tag==='queue'&&field==='n')value=object.items.length;
+      else if(object?.tag==='queue'&&field==='k')value=object.start;
+      else if(object?.tag==='queue'&&field==='length')value=object.items.length;
+      else this.fail(`Unsupported field ${field}.`);
+      return{get:()=>value,set:()=>this.fail(`${field} is read-only; use the supported operations.`)};
+    }
+    this.fail('This expression cannot be assigned to.');
+  }
+  *callExpression(ast,env){
+    if(ast.target.kind==='name'){
+      const name=ast.target.name;
+      if(['d','π','pi','color'].includes(name))return(yield* this.reference(ast,env,false)).get();
+      const routine=this.routines.find(r=>r.name===name);
+      if(routine){if(ast.args.length!==routine.params.length)this.fail(`Wrong number of arguments for ${name}.`);const args=[];
+        for(let i=0;i<ast.args.length;i++)args.push(routine.params[i].reference?yield* this.reference(ast.args[i],env):this.cell(yield* this.evaluate(ast.args[i],env)));
+        return yield* this.invoke(routine,args);
+      }
+      if(name==='swap'){
+        if(ast.args.length!==2)this.fail('swap needs two writable arguments.');const a=yield* this.reference(ast.args[0],env),b=yield* this.reference(ast.args[1],env),old=a.get();a.set(b.get());b.set(old);return null;
+      }
+      const args=[];for(const arg of ast.args)args.push(yield* this.evaluate(arg,env));
+      if(['max','min'].includes(name)){if(args.length<1||args.length>16)this.fail(`${name} needs 1–16 arguments.`);args.forEach(a=>this.numeric(a));return name==='max'?Math.max(...args):Math.min(...args);}
+      if(['abs','floor','ceil','half','Half'].includes(name)){if(args.length!==1)this.fail(`${name} needs one argument.`);const a=this.finite(args[0]);return name==='abs'?Math.abs(a):name==='floor'?Math.floor(a):name==='ceil'?Math.ceil(a):name==='half'?Math.ceil(a/2):Math.floor(a/2);}
+      if(name==='process'||name==='write') {if(args.length!==1)this.fail(`${name} needs one argument.`);if(this.output.length>=1000)this.fail('Output limit reached.');this.output.push(this.format(args[0]));this.noteVertex(args[0]);return null;}
+      this.fail(`Unsupported procedure ${name}.`);
+    }
+    if(ast.target.kind!=='field')this.fail('Only named routines and supported object operations can be called.');
+    const object=yield* this.evaluate(ast.target.object,env),name=ast.target.name,args=[];
+    for(const arg of ast.args)args.push(yield* this.evaluate(arg,env));
+    if(object?.tag==='graph'&&name==='A'){
+      if(args.length!==1||!object.adj.has(args[0]))this.fail('G.A(u) needs a vertex belonging to G.');
+      this.lastVertex=args[0];return{tag:'collection',values:[...object.adj.get(args[0])],base:1,sourceVertex:args[0]};
+    }
+    if(object?.tag!=='queue')this.fail(`Unsupported operation ${name}.`);
+    const queue=object,heap=queue.kind==='heap',stack=queue.kind==='stack';
+    const allowed=['isEmpty','isFull','length','setEmpty',...(stack?['push','pop','top']:heap?['add','remMax','max']:['add','rem','first'])];if(!allowed.includes(name))this.fail(`Unsupported ${queue.kind} operation ${name}.`);
+    if(['isEmpty','isFull','length','first','top','max','rem','pop','remMax','setEmpty'].includes(name)&&args.length)this.fail(`${name} takes no arguments.`);
+    if(name==='isEmpty')return !queue.items.length;if(name==='isFull')return queue.items.length===queue.capacity;if(name==='length')return queue.items.length;
+    if(name==='setEmpty'){queue.items=[];queue.start=0;return null;}
+    if(name==='add'||name==='push'){
+      if(args.length!==1)this.fail(`${name} needs one value.`);if(queue.items.length>=queue.capacity)this.fail(`${stack?'Stack':'Queue'}Overflow.`);
+      if((stack&&name!=='push')||(!stack&&name==='push'))this.fail('Use push/pop for Stack and add/rem for Queue.');
+      if(args[0]&&typeof args[0]==='object'&&!['node','vertex'].includes(args[0].tag))this.fail('Queue/stack items must be scalar values or node references.');queue.items.push(args[0]);if(heap){queue.items.forEach(v=>this.numeric(v));queue.items.sort((a,b)=>b-a);}this.noteVertex(args[0]);return null;
+    }
+    if(['first','top','max','rem','pop','remMax'].includes(name)){
+      if(!queue.items.length)this.fail(`${stack?'Stack':'Queue'}Underflow.`);
+      if(stack&&!['top','pop'].includes(name))this.fail('Use top/pop for Stack.');if(!stack&&['top','pop'].includes(name))this.fail('Use first/rem for Queue.');
+      const value=stack?queue.items.at(-1):queue.items[0];
+      if(['rem','pop','remMax'].includes(name)){stack?queue.items.pop():queue.items.shift();if(!stack&&!heap)queue.start=(queue.start+1)%queue.capacity;}
+      this.noteVertex(value);if(value?.tag==='vertex'&&['rem','pop'].includes(name))this.lastVertex=value;return value;
+    }
+    this.fail(`Unsupported queue/stack operation ${name}.`);
+  }
+  format(value,depth=0){
+    if(depth>4)return '…';
+    if(value===executionUninitialized)return '—';if(value===null)return '∅';if(value===undefined)return '—';if(value===Infinity)return '∞';if(value===-Infinity)return '−∞';
+    if(value?.tag==='node'||value?.tag==='vertex')return`${value.id} (${String(value.key)})`;
+    if(value?.tag==='array'||value?.tag==='collection')return '['+value.values.slice(0,64).map(v=>this.format(v,depth+1)).join(', ')+']';
+    if(value?.tag==='queue')return`${value.kind} ⟨${value.items.map(v=>this.format(v,depth+1)).join(', ')}⟩`;
+    if(value?.tag==='graph')return`${value.vertices.length} vertices, ${value.origin.doc.edges.length} edges`;
+    return String(value);
+  }
+  record(text,line=this.line){
+    if(++this.steps>this.maxSteps)this.fail(`Step limit reached (${this.maxSteps}). Possible infinite loop.`);
+    this.line=line;
+    return this.snapshot(text);
+  }
+  snapshot(text='Ready to execute'){
+    const env=this.frames.at(-1)?.env||this.lastEnv;
+    const variables=env?[...env.entries()].map(([name,cell])=>({name,value:this.format(cell.peek?cell.peek():cell.get())})):[];
+    const structures=this.origins.map(origin=>{
+      const nodes=origin.nodes.map(n=>({id:n.id,key:n.key,left:n.left?.id||null,right:n.right?.id||null,firstChild:n.firstChild?.id||null,nextSibling:n.nextSibling?.id||null,next:n.next?.id||null,prev:n.prev?.id||null,keys:n.keys||[],children:n.children?.map(c=>c.id)||[],b:n.b,d:n.tag==='vertex'&&!n.initialized.has('d')?'—':this.format(n.d),pi:n.pi?.id||null,piInitialized:n.tag!=='vertex'||n.initialized.has('pi'),color:n.color,processed:Boolean(n.processed),active:this.activeNodes.has(n)}));
+      const doc={...origin.doc,nodes:structureType(origin.doc.kind).family==='tree'||structureType(origin.doc.kind).family==='graph'?nodes:origin.doc.nodes};
+      const value=origin.value;
+      if((value?.tag==='array'||value?.tag==='collection')&&structureType(doc.kind).family!=='hash')doc.values=value.values.map(v=>v?.tag?this.format(v):v);
+      if(value?.tag==='queue'){doc.values=value.items.map(v=>v?.tag?this.format(v):v);doc.start=value.start;}
+      if(structureType(doc.kind).family==='tree')doc.root=origin.root?.id||null;
+      return{parameter:origin.parameter,doc,nodes,storage:value?.tag==='array'?value.values.map(v=>v?.tag?this.format(v):v):null,activeIndices:[...this.activeIndices].filter(key=>key.startsWith(origin.parameter+':')).map(key=>Number(key.split(':').at(-1))),edge:this.activeEdge?.origin===origin?{from:this.activeEdge.from,to:this.activeEdge.to}:null};
+    });
+    const queues=env?[...env.entries()].filter(([,cell])=>(cell.peek?cell.peek():cell.get())?.tag==='queue').map(([name,cell])=>{const q=cell.get();return{name,kind:q.kind,items:q.items.map(v=>({id:v?.tag==='vertex'?v.id:null,label:this.format(v)})),capacity:q.capacity,start:q.start};}):[];
+    return{step:this.steps,line:this.line,text,variables,structures,queues,output:[...this.output],stack:this.frames.map(f=>f.name),result:this.format(this.result),done:this.done,error:this.error?.message||null};
+  }
+  *invoke(routine,args){
+    if(this.frames.length>=64)this.fail('Call-depth limit reached (64).');
+    const env=new Map();routine.params.forEach((p,i)=>env.set(p.name,args[i]));
+    for(const [name,cell]of env){const value=cell.peek?cell.peek():cell.get();if(value?.tag==='array'){const p=routine.params.find(p=>p.name===name),lengthName=p.type.match(/\[([\p{L}_][\p{L}\p{N}_]*)\]/u)?.[1];if(lengthName&&!env.has(lengthName))env.set(lengthName,this.cell(value.values.length));}}
+    this.frames.push({name:routine.name,env});this.line=routine.line;
+    yield this.record('Enter '+routine.name,routine.line);
+    const completion=yield* this.executeBody(routine.body,env);
+    if(this.frames.length===1)this.lastEnv=env;this.frames.pop();return completion?.value??null;
+  }
+  *executeBody(nodes,env){
+    for(const node of nodes){this.line=node.line;
+      if(node.type==='statement'){
+        for(const command of node.commands){this.activeNodes.clear();this.activeIndices.clear();this.activeEdge=null;this.line=node.line;
+          if(command.kind==='assign'){const ref=yield* this.reference(command.target,env);const value=yield* this.evaluate(command.value,env);ref.set(value);this.noteVertex(value);}
+          else if(command.kind==='increment'){const ref=yield* this.reference(command.target,env);ref.set(this.numeric(ref.get())+command.delta);}
+          else if(command.kind==='declare'){
+            for(const name of command.names){let value=executionUninitialized;const queue=command.type.match(/^(Queue|Stack|PrQueue)(?:\((.*)\))?$/),array=command.type.match(/^[A-Za-z]+\[(.*)\]$/);
+              if(queue){const capacity=queue[2]?this.finite(yield* this.evaluate(executionExpression(queue[2]),env)):Math.max(64,...this.origins.map(o=>o.nodes.length));if(!Number.isInteger(capacity)||capacity<1||capacity>256)this.fail('Queue/stack capacity must be 1–256.');value={tag:'queue',kind:queue[1]==='Stack'?'stack':queue[1]==='PrQueue'?'heap':'queue',items:[],capacity,start:0};}
+              else if(array){const length=array[1]?this.finite(yield* this.evaluate(executionExpression(array[1]),env)):0;if(!Number.isInteger(length)||length<0||length>256)this.fail('Local array size must be 0–256.');value={tag:'array',values:Array(length).fill(executionUninitialized),base:0};}
+              // Scalar and pointer declarations stay uninitialized until assigned.
+
+              env.set(name,this.cell(value));
+            }
+          }
+          else if(command.kind==='call')yield* this.evaluate(command.value,env);
+          else if(command.kind==='return'){
+            const value=command.value?yield* this.evaluate(command.value,env):null;this.line=node.line;yield this.record(command.text,node.line);return{returned:true,value};
+          }
+          this.line=node.line;yield this.record(command.text,node.line);
+        }
+      }else if(node.type==='if'){
+        this.activeNodes.clear();this.activeIndices.clear();this.activeEdge=null;const condition=Boolean(yield* this.evaluate(node.condition,env));yield this.record(`if ${node.text} → ${condition}`,node.line);
+        const completion=yield* this.executeBody(condition?node.yes:node.no,env);if(completion?.returned)return completion;
+      }else if(node.type==='select'){
+        for(const branch of node.branches){this.line=branch.line;this.activeNodes.clear();this.activeIndices.clear();this.activeEdge=null;const chosen=!branch.condition||Boolean(yield* this.evaluate(branch.condition,env));yield this.record(`case ${branch.text} → ${chosen}`,branch.line);if(chosen){const completion=yield* this.executeBody(branch.body,env);if(completion?.returned)return completion;break;}}
+      }else if(node.loopKind==='while'){
+        while(true){this.line=node.line;this.activeNodes.clear();this.activeIndices.clear();this.activeEdge=null;const condition=Boolean(yield* this.evaluate(node.condition,env));yield this.record(`while ${node.text} → ${condition}`,node.line);if(!condition)break;const completion=yield* this.executeBody(node.body,env);if(completion?.returned)return completion;}
+      }else{
+        let values,sourceVertex=null;
+        if(node.loopKind==='each'){const collection=yield* this.evaluate(node.collection,env);if(collection?.tag!=='collection'&&collection?.tag!=='array')this.fail('A collection loop needs G.V, G.A(u), a set or a sequence.');values=[...collection.values];sourceVertex=collection.sourceVertex||null;}
+        else{const from=this.finite(yield* this.evaluate(node.from,env)),to=this.finite(yield* this.evaluate(node.to,env));if(!Number.isSafeInteger(from)||!Number.isSafeInteger(to)||Math.abs(to-from)>20000)this.fail('Numeric range must use safe integers and at most 20,000 iterations.');values=[];for(let i=from;node.delta>0?i<=to:i>=to;i+=node.delta)values.push(i);}
+        if(!env.has(node.variable))env.set(node.variable,this.cell(0));
+        for(const value of values){this.line=node.line;this.activeNodes.clear();this.activeIndices.clear();this.activeEdge=null;env.get(node.variable).set(value);this.noteVertex(value);yield this.record(`${node.variable} := ${this.format(value)}`,node.line);const completion=yield* this.executeBody(node.body,env);if(completion?.returned)return completion;}
+        if(sourceVertex)sourceVertex.processed=true;this.line=node.line;yield this.record('Loop finished',node.line);
+      }
+    }
+    return null;
+  }
+  *program(){
+    const args=this.entry.params.map(parameter=>{
+      const value=this.bindings.get(parameter.name),origin=this.origins.find(o=>o.parameter===parameter.name),cell=this.cell(value,origin);
+      if(parameter.reference){const origin=this.origins.find(o=>o.parameter===parameter.name);if(origin&&structureType(origin.doc.kind).family==='tree')return{origin,get:cell.get,set:next=>{if(next!==null&&next?.origin!==origin)this.fail('A tree root must refer to a node in its working copy.');cell.set(next);origin.root=next;origin.value=next;}};}
+      return cell;
+    });
+    this.result=yield* this.invoke(this.entry,args);this.done=true;yield this.snapshot('Execution finished');
+  }
+  step(){
+    if(this.done||this.error)return this.snapshot(this.error?'Execution stopped':'Execution finished');
+    try{const next=this.iterator.next();if(next.done)this.done=true;return next.value||this.snapshot('Execution finished');}
+    catch(error){this.error=error instanceof ExecutionError?error:new ExecutionError(error.message,this.line);this.error.line||=this.line;this.line=this.error.line;return this.snapshot('Execution stopped');}
+  }
+}
+
+function renderExecutionStructure(snapshot) {
+  const {doc,nodes,edge,activeIndices}=snapshot;
+  const family=structureType(doc.kind).family;
+  if(family==='hash')return renderStructure({...doc,kind:'array',name:doc.name+' · physical table',values:snapshot.storage||[]});
+  if(family==='list'){
+    const width=Math.max(620,nodes.length*140+120),height=260,positions=new Map(nodes.map((n,i)=>[n.id,{x:80+i*140,y:100}]));
+    const parts=[`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Runtime list pointers">`];
+    for(const n of nodes){const p=positions.get(n.id);if(n.next&&positions.has(n.next)){const q=positions.get(n.next);parts.push(`<path d="M ${p.x+40} ${p.y+22} L ${p.x+60} ${p.y+22} L ${p.x+60} 200 L ${q.x-40} 200 L ${q.x-40} ${q.y+22}" fill="none" stroke="#768d7f"/><text x="${p.x+55}" y="${p.y+12}" font-size="11">next</text>`);}}
+    for(const n of nodes){const p=positions.get(n.id);parts.push(`<g data-node-id="${escapeXML(n.id)}" class="${n.active?'run-node-active':''}"><rect x="${p.x-40}" y="${p.y}" width="80" height="45" fill="${n.active?'#ffdc92':'white'}" stroke="#6d897b"/><text x="${p.x}" y="${p.y+28}" text-anchor="middle">${escapeXML(String(n.key).slice(0,12))}</text><text x="${p.x}" y="${p.y-12}" text-anchor="middle" font-size="12">${escapeXML(n.id)}</text></g>`);}
+    parts.push('</svg>');return parts.join('');
+  }
+  if(family==='graph'){
+    const count=nodes.length,radius=Math.max(120,count*14),width=Math.max(620,radius*2+140),height=Math.max(390,radius*2+130);
+    const positions=new Map(nodes.map((n,i)=>[n.id,{x:width/2+radius*Math.cos(i*2*Math.PI/count-Math.PI/2),y:height/2+radius*Math.sin(i*2*Math.PI/count-Math.PI/2)}]));
+    const parts=[`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" role="img" aria-label="Execution graph"><defs><marker id="run-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto"><path d="M 0 0 L 10 5 L 0 10 z" fill="#789185"/></marker></defs>`];
+    for(const link of doc.edges){const a=positions.get(link.from),b=positions.get(link.to),angle=Math.atan2(b.y-a.y,b.x-a.x),highlight=edge&&((edge.from===link.from&&edge.to===link.to)||(doc.kind==='graph'&&edge.from===link.to&&edge.to===link.from));
+      parts.push(`<line class="${highlight?'run-edge-active':''}" x1="${a.x+29*Math.cos(angle)}" y1="${a.y+29*Math.sin(angle)}" x2="${b.x-31*Math.cos(angle)}" y2="${b.y-31*Math.sin(angle)}" stroke="${highlight?'#cf8b20':'#a5b5aa'}" stroke-width="${highlight?4:1.5}" ${doc.kind==='digraph'?'marker-end="url(#run-arrow)"':''}/>`);
+    }
+    for(const n of nodes){const p=positions.get(n.id),discovered=(n.d!=='∞'&&n.d!=='—')||['gray','grey','black'].includes(n.color),processed=n.processed||n.color==='black',fill=n.active?'#ffdc92':processed?'#c5e3ce':discovered?'#dceaf8':'#fff';
+      parts.push(`<g class="run-node ${n.active?'run-node-active':''}" data-node-id="${escapeXML(n.id)}"><title>${escapeXML(`${n.id}: key=${n.key}; d=${n.d}; π=${n.pi||'∅'}`)}</title><circle cx="${p.x}" cy="${p.y}" r="27" fill="${fill}" stroke="${n.active?'#bc7b16':'#6d897b'}" stroke-width="${n.active?3:1.5}"/><text x="${p.x}" y="${p.y+5}" text-anchor="middle" font-family="Georgia,serif" font-size="16">${escapeXML((String(n.key).length>8?String(n.key).slice(0,7)+'…':n.key))}</text><text x="${p.x}" y="${p.y+47}" text-anchor="middle" font-size="12" fill="#62766a">${escapeXML(`${n.id} · d=${n.d}`)}</text></g>`);
+    }
+    if(!nodes.length)parts.push('<text x="50" y="80">Empty graph</text>');parts.push('</svg>');return parts.join('');
+  }
+  // Use the course renderer for geometry, and mark the exact runtime nodes/indices.
+  let svg=renderStructure(doc,{runtimeBalances:true});
+  if(family==='tree'){
+    for(const n of nodes.filter(n=>n.active)){
+      const label=escapeXML(n.id===doc.root?`${n.id} ← ${doc.name}`:n.id);
+      svg=svg.replace(new RegExp(`(<text[^>]*>)${label.replace(/[.*+?^${}()|[\]\\]/g,'\\$&')}(</text>)`,'g'),`$1▶ ${label}$2`);
+    }
+  }
+  if(activeIndices?.length)svg=svg.replace('</svg>',`<text x="20" y="60" font-size="14" fill="#a16b12">${escapeXML('Active indices: '+activeIndices.join(', '))}</text></svg>`);
+  return svg;
+}
+
+
+function initExecutionUI({ getSource, highlight }) {
+  const el=id=>document.getElementById(id),dialog=el('execution-dialog');
+  let captured='',routines=[],structures=[],preferred=0,fields=new Map(),session=null,history=[],cursor=0,timer=null,playing=false;
+  const message=(text,error=false)=>{el('run-message').textContent=text;el('run-message').dataset.error=String(error);};
+  const option=(select,value,label)=>{const node=document.createElement('option');node.value=value;node.textContent=label;select.append(node);};
+  const pause=()=>{clearTimeout(timer);timer=null;playing=false;controls();};
+  function controls(){
+    const state=history[cursor],atEnd=cursor===history.length-1,finished=atEnd&&(state?.done||state?.error);
+    el('run-play').disabled=!routines.length||playing||finished;el('run-next').disabled=!routines.length||playing||finished;
+    el('run-pause').disabled=!playing;el('run-back').disabled=playing||cursor===0;el('run-reset').disabled=!routines.length;
+    el('run-entry').disabled=playing;el('run-bindings').querySelectorAll('input,select').forEach(input=>input.disabled=playing);
+  }
+  function invalidate(){pause();session=null;history=[];cursor=0;el('run-step-label').textContent='Ready';message('Choose inputs, then Run or Next step.');controls();}
+  function compatible(parameter,doc){
+    const type=parameter.type,family=structureType(doc.kind).family;
+    if(type==='G')return family==='graph';
+    if(type.endsWith('*'))return family==='tree'||family==='list';
+    if(type.includes('['))return ['array','sequence','heap','direct','chain','open'].includes(doc.kind);
+    if(type.startsWith('Queue'))return doc.kind==='queue';if(type.startsWith('Stack'))return doc.kind==='stack';if(type.startsWith('PrQueue'))return doc.kind==='heap';
+    if(type.includes('{}'))return doc.kind==='set';if(type.includes('⟨'))return doc.kind==='sequence';return false;
+  }
+  function isStructure(parameter){return parameter.type==='G'||parameter.type.endsWith('*')||/[\[{}⟨]/.test(parameter.type)||/^(Queue|Stack|PrQueue)/.test(parameter.type);}
+  function readStructures(){
+    const raw=localStorage.getItem('structogram.ads.structures.v1');structures=raw?readStructureFile(raw):[];
+    try{preferred=raw?JSON.parse(raw).selected||0:0;}catch{preferred=0;}
+  }
+  function bindingsUI(){
+    const previous=Object.fromEntries([...fields].map(([name,field])=>[name,field.input.value]));fields=new Map();el('run-bindings').replaceChildren();
+    const entry=routines.find(r=>r.name===el('run-entry').value);if(!entry)return;
+    const add=(parameter,input,kind)=>{const label=document.createElement('label');label.textContent=`${parameter.name} : ${parameter.type}`;input.id='run-input-'+parameter.name;input.setAttribute('aria-label',`${parameter.name} input`);label.append(input);el('run-bindings').append(label);fields.set(parameter.name,{input,kind,parameter});input.addEventListener('change',()=>{invalidate();if(kind==='structure'&&parameter.type==='G')bindingsUI();});};
+    for(const parameter of entry.params.filter(p=>p.type!=='V')){
+      if(isStructure(parameter)){
+        const input=document.createElement('select'),matches=structures.map((doc,index)=>({doc,index})).filter(({doc})=>compatible(parameter,doc));
+        if(!matches.length)option(input,'','Create a compatible structure first');
+        for(const {doc,index}of matches)option(input,String(index),`${doc.name} · ${structureType(doc.kind).label}`);
+        if(matches.some(m=>String(m.index)===previous[parameter.name]))input.value=previous[parameter.name];else if(matches.some(m=>m.index===preferred))input.value=String(preferred);
+        add(parameter,input,'structure');
+      }else{const input=document.createElement('input');input.maxLength=200;input.value=previous[parameter.name]??'0';add(parameter,input,'scalar');}
+    }
+    for(const parameter of entry.params.filter(p=>p.type==='V')){
+      const input=document.createElement('select');
+      for(const [name,field]of fields){if(field.kind!=='structure')continue;const index=field.input.value,doc=index!==''?structures[Number(index)]:null;if(!doc||!['graph','digraph'].includes(doc.kind))continue;for(const node of doc.nodes)option(input,name+'|'+node.id,`${name}: ${node.id} · ${node.key}`);}
+      if(!input.options.length)option(input,'','Choose a non-empty graph first');if([...input.options].some(o=>o.value===previous[parameter.name]))input.value=previous[parameter.name];add(parameter,input,'vertex');
+    }
+    controls();
+  }
+  function readBindings(){
+    const result={};for(const [name,field]of fields){const value=field.input.value;
+      if(field.kind==='structure'){if(value==='')throw Error(`Create and select a structure for ${name}.`);result[name]={structure:structures[Number(value)]};}
+      else if(field.kind==='vertex'){const [graphParam,vertex]=value.split('|');if(!vertex)throw Error(`Choose a start vertex for ${name}.`);result[name]={graphParam,vertex};}
+      else{let scalar;try{scalar=JSON.parse(value);}catch{scalar=value;}if(scalar!==null&&!['string','number','boolean'].includes(typeof scalar))throw Error(`Enter a scalar value for ${name}.`);result[name]=scalar;}
+    }return result;
+  }
+  function prepare(){
+    if(session)return true;
+    try{session=new ExecutionSession(captured,el('run-entry').value,readBindings());history=[session.snapshot()];cursor=0;show();return true;}
+    catch(error){message(`${error.line?'Line '+error.line+': ':''}${error.message}`,true);return false;}
+  }
+  function table(target,head,rows){target.replaceChildren();const t=document.createElement('table'),header=document.createElement('tr');for(const name of head){const cell=document.createElement('th');cell.scope='col';cell.textContent=name;header.append(cell);}t.append(header);for(const row of rows){const tr=document.createElement('tr');for(const value of row){const cell=document.createElement('td');cell.textContent=String(value);tr.append(cell);}t.append(tr);}target.append(t);}
+  function show(){
+    const state=history[cursor];if(!state)return;
+    el('run-step-label').textContent=`Step ${state.step}${history[0]?.step>0?' · last 500 steps retained':''}`;
+    message(`${state.error?'Line '+state.line+': '+state.error:state.text}`,Boolean(state.error));
+    el('run-code').querySelectorAll('li').forEach((row,index)=>row.classList.toggle('run-line-current',index+1===state.line));
+    el('run-code').children[state.line-1]?.scrollIntoView({block:'nearest'});
+    el('run-structogram').querySelectorAll('[data-line]').forEach(row=>row.classList.toggle('run-current',Number(row.dataset.line)===state.line));
+    highlight(state.line);
+    const selected=el('run-structure').value;el('run-structure').replaceChildren();state.structures.forEach((s,i)=>option(el('run-structure'),String(i),`${s.parameter}: ${s.doc.name}`));if([...el('run-structure').options].some(o=>o.value===selected))el('run-structure').value=selected;
+    showStructure(state);
+    el('run-queues').replaceChildren();for(const queue of state.queues){const card=document.createElement('div');card.className='run-queue';const title=document.createElement('strong');title.textContent=`${queue.name} · ${queue.kind} · n=${queue.items.length}, capacity=${queue.capacity}${queue.kind==='queue'?', k='+queue.start:''}`;card.append(title);const note=document.createElement('small');note.textContent=queue.kind==='stack'?'Bottom → top':'Front → back';card.append(note);if(!queue.items.length)card.append(document.createTextNode(' ⟨⟩'));for(const value of queue.items){const item=document.createElement('span');item.textContent=value.label;card.append(item);}el('run-queues').append(card);}
+    table(el('run-variables'),['Variable','Value'],state.variables.map(v=>[v.name,v.value]));
+    el('run-stack').textContent='Call stack: '+(state.stack.join(' → ')||'finished')+(state.done?' · Return: '+state.result:'');el('run-output').textContent=state.output.length?state.output.join(' → '):'No process/write output yet.';
+    controls();
+  }
+  function showStructure(state=history[cursor]){
+    const selected=state?.structures[Number(el('run-structure').value)||0];
+    if(!selected){el('run-graph').textContent='No structure parameter is bound. Scalar variables are shown below.';table(el('run-node-state'),['Node','State'],[]);return;}
+    el('run-graph').innerHTML=renderExecutionStructure(selected);
+    for(const node of selected.nodes.filter(n=>n.active))el('run-graph').querySelectorAll(`[data-node-id="${node.id}"]`).forEach(element=>element.classList.add('run-node-active'));
+    for(const index of selected.activeIndices)el('run-graph').querySelectorAll(`[data-array-index="${index}"]`).forEach(element=>element.classList.add('run-array-active'));
+    const graph=['graph','digraph'].includes(selected.doc.kind);el('run-legend').textContent=graph?'Orange: accessed this step · Blue: finite d / gray · Green: adjacency iteration completed / black · White: undiscovered':'Highlighted nodes and indices were accessed by the current step.';
+    table(el('run-node-state'),graph?['Node / key','d','π']:['Node / key','b','Pointers'],selected.nodes.map(n=>graph?[`${n.id} (${n.key})`,n.d,n.piInitialized?(n.pi||'∅'):'—']:[`${n.id} (${n.key})`,n.b,`left=${n.left||'∅'}, right=${n.right||'∅'}, next=${n.next||'∅'}`]));
+  }
+  function advance(){
+    if(cursor<history.length-1){cursor++;show();if(history[cursor].done||history[cursor].error)pause();return;}
+    if(!prepare())return;
+    const state=session.step();history.push(state);cursor=history.length-1;if(history.length>500){history.shift();cursor--;}
+    show();if(state.error||state.done)pause();
+  }
+  function tick(){if(!playing)return;advance();if(playing)timer=setTimeout(tick,Number(el('run-speed').value));}
+  function open(){
+    pause();session=null;history=[];cursor=0;
+    try{
+      captured=getSource();routines=compileExecution(parse(captured),captured);readStructures();
+      el('run-entry').replaceChildren();for(const routine of routines)option(el('run-entry'),routine.name,routine.signature);
+      el('run-code').replaceChildren();captured.split('\n').forEach(text=>{const li=document.createElement('li');li.textContent=text||' ';el('run-code').append(li);});
+      el('run-structogram').innerHTML=render(parse(captured)).svg;
+      bindingsUI();message('Choose inputs, then Run or Next step.');
+      el('run-graph').textContent=structures.length?'Ready to bind your saved structures.':'Create a structure using Data structures, then return here.';
+      el('run-queues').replaceChildren();el('run-variables').replaceChildren();el('run-node-state').replaceChildren();el('run-output').textContent='';el('run-stack').textContent='';el('run-step-label').textContent='Ready';
+    }catch(error){routines=[];message(`${error.line?'Line '+error.line+': ':''}${error.message}`,true);}
+    controls();dialog.showModal();
+  }
+  el('open-execution').addEventListener('click',open);el('close-execution').addEventListener('click',()=>dialog.close());dialog.addEventListener('close',()=>{pause();highlight(null);});
+  el('run-entry').addEventListener('change',()=>{invalidate();bindingsUI();});el('run-refresh').addEventListener('click',()=>{try{readStructures();invalidate();bindingsUI();}catch(error){message(error.message,true);}});
+  el('run-next').addEventListener('click',()=>{pause();advance();});el('run-back').addEventListener('click',()=>{pause();if(cursor>0){cursor--;show();}});
+  el('run-reset').addEventListener('click',()=>{invalidate();prepare();});
+  el('run-play').addEventListener('click',()=>{if(!prepare())return;playing=true;controls();tick();});el('run-pause').addEventListener('click',pause);
+  el('run-structure').addEventListener('change',()=>showStructure());
+  for(const tab of ['source','diagram'])el('run-tab-'+tab).addEventListener('click',()=>{el('run-code').hidden=tab!=='source';el('run-structogram').hidden=tab!=='diagram';for(const other of ['source','diagram']){el('run-tab-'+other).setAttribute('aria-selected',String(tab===other));el('run-tab-'+other).tabIndex=tab===other?0:-1;}});
+  for(const tab of ['source','diagram'])el('run-tab-'+tab).addEventListener('keydown',event=>{if(event.key==='ArrowLeft'||event.key==='ArrowRight'){event.preventDefault();const other=el('run-tab-'+(tab==='source'?'diagram':'source'));other.click();other.focus();}});
+  if(new URL(location.href).searchParams.get('run')==='1'){const url=new URL(location.href);url.searchParams.delete('run');historyReplace(url);open();}
+  function historyReplace(url){window.history.replaceState(null,'',url);}
 }
 
 
@@ -1088,6 +1881,20 @@ if (!storageAvailable) $('save-status').textContent = 'Use Save source to keep y
 initWorkspaceLayout(() => {
   if (editorMode === 'blocks') visual?.resize();
   if (fitMode) applyZoom();
+});
+
+initExecutionUI({
+  getSource() {
+    if (document.activeElement?.classList.contains('blocklyHtmlInput')) document.activeElement.blur();
+    if (editorMode === 'blocks') visual?.flush();
+    if (visual?.error && editorMode === 'blocks') throw visual.error;
+    persist(); updatePreview();
+    return source.value;
+  },
+  highlight(line) {
+    stage.querySelectorAll('[data-line]').forEach(row => row.classList.toggle('execution-current', Number(row.dataset.line) === line));
+    visual?.highlightLine(line);
+  }
 });
 
 };

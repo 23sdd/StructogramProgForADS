@@ -146,7 +146,7 @@ function writeStructureFile(structures) {
 }
 
 function escapeStructure(value){return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));}
-function renderStructure(doc){
+function renderStructure(doc,{runtimeBalances=false}={}){
   const type=structureType(doc.kind),{metrics}=analyseStructure(doc),parts=[];
   let width=900,height=280;
   const text=(x,y,value,size=16)=>`<text x="${x}" y="${y}" font-size="${size}" text-anchor="middle">${escapeStructure(value)}</text>`;
@@ -178,7 +178,7 @@ function renderStructure(doc){
         const logical=doc.kind==='queue'?(i-doc.start+doc.capacity)%doc.capacity:i;
         const value=logical<values.length?values[logical]:'·';
         const x=doc.kind==='stack'?140:80+i*78,y=doc.kind==='stack'?65+(count-1-i)*55:110;
-        parts.push(box(x,y,70,48,value),text(x+35,y-8,i,12));
+        parts.push(box(x,y,70,48,value).replace('<rect ','<rect data-array-index="'+i+'" '),text(x+35,y-8,i,12));
         if(doc.kind==='stack'&&i===values.length-1)parts.push(text(x+140,y+30,'← top',14));
         if(doc.kind==='queue'&&i===doc.start)parts.push(text(x+35,y+75,'↑ k',13));
       }
@@ -210,9 +210,9 @@ function renderStructure(doc){
     }
     for(const n of doc.nodes){const p=positions.get(n.id);
       if(doc.kind==='bplus'){const w=Math.max(90,n.keys.length*35);parts.push(box(p.x-w/2,p.y-24,w,48,n.keys.join(' | ')||'∅'));}
-      else parts.push(`<circle cx="${p.x}" cy="${p.y}" r="26" fill="white" stroke="#263b32"/>`,text(p.x,p.y+6,n.key));
+      else parts.push(`<circle data-node-id="${escapeStructure(n.id)}" cx="${p.x}" cy="${p.y}" r="26" fill="white" stroke="#263b32"/>`,text(p.x,p.y+6,n.key));
       parts.push(text(p.x,p.y-38,n.id===doc.root?`${n.id} ← ${doc.name}`:n.id,12));
-      if(doc.kind==='avl'&&(n.left||n.right)){const b=metrics[n.id]?.balance??0;parts.push(text(p.x+43,p.y+5,b===0?'◦':b===1?'+':b===-1?'−':b===2?'++':b===-2?'−−':b,15));}
+      if(doc.kind==='avl'&&(n.left||n.right)){const b=runtimeBalances?(n.b??0):(metrics[n.id]?.balance??0);parts.push(text(p.x+43,p.y+5,b===0?'◦':b===1?'+':b===-1?'−':b===2?'++':b===-2?'−−':b,15));}
     }
     if(!doc.nodes.length)parts.push(text(250,130,`${doc.name} = ∅`));
   }else{
@@ -244,7 +244,7 @@ function structureNotation(doc){
   }else if(type.family==='hash'){
     out.push(`T[0..${doc.capacity}) · m = ${doc.capacity} · n = ${doc.values.length}`,doc.kind==='direct'?'T[k] stores key k':`h(k) = ((k mod m) + m) mod m${doc.kind==='open'?'; linear probing h(k,i) = (h(k) + i) mod m':''}`);
     hashBuckets(doc).forEach((b,i)=>out.push(`T[${i}] = ${b.length?b.join(' → ')+(doc.kind==='chain'?' → ∅':''):doc.kind==='open'?'E':'∅'}`));
-    if(doc.kind==='open')out.push('E = empty. Editing the value list rebuilds the table; in-place deletion/tombstone D operations belong to the later execution stage.');
+    if(doc.kind==='open')out.push('E = empty. Editing the value list rebuilds the table; this editor rebuilds layouts rather than performing in-place D-marker deletion.');
   }else{
     const stored=doc.kind==='queue'?Array.from({length:doc.capacity},(_,i)=>{const logical=(i-doc.start+doc.capacity)%doc.capacity;return logical<doc.values.length?JSON.stringify(doc.values[logical]):'·';}):doc.values.map(v=>JSON.stringify(v));
     out.push(`${doc.kind==='queue'?'Z':'A'} = [${stored.join(', ')}]`, `n = ${doc.values.length}`);
@@ -295,7 +295,7 @@ function dsRender(){
   ds('ds-title').textContent=doc.name;ds('ds-type').textContent=type.label;ds('ds-name').value=doc.name;ds('ds-capacity').parentElement.hidden=!['stack','queue','heap','direct','chain','open'].includes(doc.kind);ds('ds-capacity').value=doc.capacity;ds('ds-start').value=doc.start;ds('ds-start-label').hidden=doc.kind!=='queue';ds('ds-values-label').hidden=isTree||isGraph;ds('ds-values').value=JSON.stringify(doc.values);
   ds('ds-root-label').hidden=!isTree;dsPointers(ds('ds-root'),doc,doc.root);ds('ds-node-label').hidden=!(isTree||isGraph);ds('ds-add-node').hidden=!(isTree||isGraph);ds('ds-add-node').disabled=doc.nodes.length>=64;ds('ds-nodes-section').hidden=!(isTree||isGraph);ds('ds-edges-section').hidden=!isGraph;
   ds('ds-undo').disabled=!dsUndo.length;ds('ds-redo').disabled=!dsRedo.length;
-  ds('ds-guidance').textContent=doc.kind==='avl'?'AVL: b = h(right) − h(left), h(∅) = −1. Connections are edited manually. Balance is computed; imbalance is reported, not automatically rotated.':doc.kind==='bplus'?'B+ uses a standard keys/children/next representation. The supplied tree notes refer to a separate B+ PDF that was not included; this preview is not claimed to reproduce its exact notation. Build internal nodes and the leaf chain manually.':doc.kind==='general'?'General tree in the lecture representation: firstChild points to the first child; nextSibling points to its next sibling. The diagram shows these exact pointers.':isGraph?'Simple graphs: vertex indices start at 1; no self-loops or repeated edges. Undirected edges appear in both adjacency lists. The matrix and lists describe the same graph.':doc.kind==='open'?'Initial table built with integer keys and linear probing. Editing the keys rebuilds its layout. E means empty; in-place deletion with D markers will be part of the execution stage.':['bst','binary'].includes(doc.kind)?'Choose a root and edit left/right pointers. Node IDs identify objects; keys are their values. Warnings expose invalid topology or ordering.':type.family==='list'?'key values belong to nodes. next/prev and header/trailer connections are derived from the value order, matching the selected list variant.':doc.kind==='queue'?'Circular storage Z: k is the physical first index; n is the number of values. Values are entered in FIFO order and placed at Z[(k+i) mod Z.length].':'Edit the values and apply changes. This section creates data; linking it to algorithm execution comes later.';
+  ds('ds-guidance').textContent=doc.kind==='avl'?'AVL: b = h(right) − h(left), h(∅) = −1. Connections are edited manually. Balance is computed; imbalance is reported, not automatically rotated.':doc.kind==='bplus'?'B+ uses a standard keys/children/next representation. The supplied tree notes refer to a separate B+ PDF that was not included; this preview is not claimed to reproduce its exact notation. Build internal nodes and the leaf chain manually.':doc.kind==='general'?'General tree in the lecture representation: firstChild points to the first child; nextSibling points to its next sibling. The diagram shows these exact pointers.':isGraph?'Simple graphs: vertex indices start at 1; no self-loops or repeated edges. Undirected edges appear in both adjacency lists. The matrix and lists describe the same graph.':doc.kind==='open'?'Initial table built with integer keys and linear probing. Editing the keys rebuilds its layout. E means empty; in-place deletion with D markers are not implemented by this layout editor.':['bst','binary'].includes(doc.kind)?'Choose a root and edit left/right pointers. Node IDs identify objects; keys are their values. Warnings expose invalid topology or ordering.':type.family==='list'?'key values belong to nodes. next/prev and header/trailer connections are derived from the value order, matching the selected list variant.':doc.kind==='queue'?'Circular storage Z: k is the physical first index; n is the number of values. Values are entered in FIFO order and placed at Z[(k+i) mod Z.length].':'Edit the values and apply changes. This section creates data; use Run with algorithm to bind this structure to the written routine.';
   const analysis=analyseStructure(doc);ds('ds-issues').replaceChildren();ds('ds-issues').hidden=!analysis.issues.length;if(analysis.issues.length){const strong=document.createElement('strong');strong.textContent='Structure checks';const list=document.createElement('ul');for(const issue of analysis.issues){const li=document.createElement('li');li.textContent=issue;list.append(li);}ds('ds-issues').append(strong,list);}
   ds('ds-diagram').innerHTML=renderStructure(doc);ds('ds-notation').textContent=structureNotation(doc);
   ds('ds-nodes').replaceChildren();
@@ -343,6 +343,7 @@ ds('ds-open').addEventListener('click',()=>ds('ds-file').click());ds('ds-file').
 window.addEventListener('beforeunload',event=>{if(dsDirty){event.preventDefault();event.returnValue='';}});
 window.addEventListener('structogram-before-update',event=>{if(dsDirty||!dsPersist())event.preventDefault();});
 window.addEventListener('pagehide',dsPersist);
+ds('ds-run').addEventListener('click',()=>dsAttempt(()=>{dsApplyDraft();dsPersist();location.href='./?run=1';}));
 dsRender();if(!dsStored)dsStatus('Saved structures could not be loaded or local storage is unavailable. Import a backup if needed.',true);
 
 })();

@@ -1,4 +1,4 @@
-/** The document language uses indentation; expressions are kept as text, never executed. */
+/** The document language uses indentation; the diagram parser keeps expressions as text. The optional execution layer compiles a bounded subset separately. */
 export class ParseError extends Error {
   constructor(message, line) {
     super(message);

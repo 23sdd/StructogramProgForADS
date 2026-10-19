@@ -10,7 +10,7 @@ await writeFile(new URL('app.bundle.js', root), bundle);
 await writeFile(new URL('structures.bundle.js', root), await createStructuresBundle());
 await rm(output, { recursive: true, force: true });
 await mkdir(output, { recursive: true });
-for (const item of ['index.html', 'styles.css', 'assets', 'app.bundle.js', 'manifest.webmanifest', 'pwa.js', 'structures.html', 'structures.css', 'structures.bundle.js']) {
+for (const item of ['index.html', 'styles.css', 'assets', 'app.bundle.js', 'manifest.webmanifest', 'pwa.js', 'structures.html', 'structures.css', 'structures.bundle.js', 'execution.css']) {
   await cp(new URL(item, root), new URL(item, output), { recursive: true });
 }
 const vendor = new URL('vendor/blockly/', output);

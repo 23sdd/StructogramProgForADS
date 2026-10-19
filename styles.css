@@ -1128,3 +1128,7 @@ body {
 .ds-entry { margin:0 0 22px;text-decoration:none; }
 .ds-entry-mobile { display:none;text-decoration:none; }
 @media(max-width:860px){.ds-entry-mobile{display:inline-flex}.topbar{flex-wrap:wrap;height:auto;min-height:62px;padding-block:10px;gap:10px}.top-actions{flex-wrap:wrap}}
+
+.execution-current>.hit-area{fill:#efb843;fill-opacity:.32}
+@media print{.execution-current>.hit-area{fill-opacity:0}}
+.topbar{flex-wrap:wrap;height:auto;min-height:77px;padding-block:10px;gap:10px}.top-actions{flex-wrap:wrap}
