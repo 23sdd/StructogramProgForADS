@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+<meta name="referrer" content="no-referrer"><meta name="viewport" content="width=device-width, initial-scale=1"><meta name="theme-color" content="#226c5c">
+<title>Data structures — Structogram ADS</title>
+<link rel="icon" href="./assets/favicon.svg" type="image/svg+xml"><link rel="manifest" href="./manifest.webmanifest"><link rel="stylesheet" href="./styles.css"><link rel="stylesheet" href="./structures.css">
+<script defer src="./structures.bundle.js"></script><script defer src="./pwa.js"></script>
+</head>
+<body class="structures-page">
+<header class="ds-top"><a class="ds-back" href="./">← Algorithm editor</a><strong>Structogram <span> / Data structures</span></strong><button id="ds-undo" class="button">↶ Undo</button><button id="ds-redo" class="button">↷ Redo</button><button id="ds-open" class="button">Open structures</button><button id="ds-save" class="button">Save all</button><input id="ds-file" type="file" accept=".json,application/json" hidden></header>
+<main class="ds-main">
+<section class="ds-intro"><div><div class="eyebrow">BUILD YOUR DATA</div><h1>Data structures</h1><p>Create values, nodes and connections in the notation of your lectures.</p></div><button id="ds-create" class="button button-primary">＋ Create structure</button></section>
+<p id="ds-status" role="status" class="ds-status">Your structures stay on this device.</p>
+<div class="ds-layout">
+<aside class="ds-library" aria-label="Saved structures"><h2>Your structures <span id="ds-count">0 / 30</span></h2><nav id="ds-list"></nav><p>Each structure is independent. Save a file to keep a backup or move it to another device.</p></aside>
+<section id="ds-empty" class="ds-empty"><h2>Build the input before the algorithm</h2><p>Arrays, stacks, queues, linked lists, trees, heaps, hash tables, sets, sequences and graphs.</p><button id="ds-create-empty" class="button button-primary">Create your first structure</button><p class="ds-muted">Algorithm execution and linking structures to routines will be added separately.</p></section>
+<section id="ds-editor" class="ds-editor" hidden>
+<header class="ds-heading"><div><h2 id="ds-title"></h2><p id="ds-type"></p></div><div class="ds-actions"><button id="ds-svg" class="button">Export SVG</button><button id="ds-delete" class="button">Delete structure</button></div></header>
+<form id="ds-settings" class="ds-settings">
+<label>Name<input id="ds-name" maxlength="60" required></label><label>Capacity / table size m<input id="ds-capacity" type="number" min="1" max="64" required></label><label id="ds-start-label">Queue start k<input id="ds-start" type="number" min="0" max="63" required></label>
+<label class="ds-values-label" id="ds-values-label">Values<textarea id="ds-values" rows="3" maxlength="12000" placeholder='5, 3, 7 or [5, "text", 7]'></textarea><small>Numbers or text. Use a JSON list for text containing spaces. Up to 64 values.</small></label>
+<button class="button button-primary" type="submit">Apply changes</button>
+</form>
+<div class="ds-toolbar"><label id="ds-root-label">Root<select id="ds-root"></select></label><label id="ds-node-label">New node key<input id="ds-node-key" value="0" maxlength="100"></label><button id="ds-add-node" class="button">＋ Add node</button></div>
+<p id="ds-guidance" class="ds-guidance"></p>
+<div id="ds-issues" class="ds-issues" role="status" hidden></div>
+<div class="ds-diagram-wrap"><div id="ds-diagram" class="ds-diagram"></div></div>
+<section id="ds-nodes-section"><h3>Nodes and pointers</h3><p class="ds-muted">Edit the key and choose pointer targets. Apply node changes to save the edited rows. ∅ means no object.</p><div class="ds-table-wrap"><div id="ds-nodes"></div></div></section>
+<section id="ds-edges-section"><h3>Edges</h3><form id="ds-add-edge" class="ds-toolbar"><label>From<select id="ds-edge-from"></select></label><label>To<select id="ds-edge-to"></select></label><button class="button" type="submit">＋ Add edge</button></form><div id="ds-edges"></div><h3>Adjacency matrix · A/1 : bit[n,n]</h3><div id="ds-matrix" class="ds-table-wrap"></div></section>
+<details open><summary>Lecture notation / representation</summary><pre id="ds-notation"></pre></details>
+</section>
+</div>
+<footer class="ds-footer"><span id="offline-status" role="status">Preparing offline access…</span><button id="install-app" class="button button-quiet">Use as an app</button><span>Local data · No algorithm execution</span></footer>
+</main>
+<dialog id="ds-create-dialog" aria-labelledby="ds-create-title"><header class="dialog-header"><h2 id="ds-create-title">Create a data structure</h2><button id="ds-close-create" class="close-button" type="button" aria-label="Close">×</button></header><form id="ds-create-form" class="ds-create-form"><label>Structure<select id="ds-kind"></select></label><label>Name<input id="ds-new-name" value="A" maxlength="60" required></label><label>Initial values / node keys<textarea id="ds-new-values" rows="3" placeholder="5, 3, 7"></textarea></label><label>Capacity / table size m<input id="ds-new-capacity" type="number" value="8" min="1" max="64" required></label><p>Use integer keys for BST, AVL, B+, heaps and hash tables. Tree and graph connections can be edited after creation. An empty value list creates an empty structure.</p><p id="ds-create-error" role="alert"></p><button class="button button-primary" type="submit">Create</button></form></dialog>
+<dialog id="ds-delete-dialog" aria-labelledby="ds-delete-title"><header class="dialog-header"><h2 id="ds-delete-title">Delete this structure?</h2></header><p>It will be removed from this workspace. Undo can restore it.</p><div class="dialog-actions"><button id="ds-cancel-delete" class="button">Cancel</button><button id="ds-confirm-delete" class="button button-primary">Delete</button></div></dialog>
+<dialog id="install-dialog" aria-labelledby="install-title"><header class="dialog-header"><h2 id="install-title">Use as an app</h2><button id="close-install" class="close-button" aria-label="Close">×</button></header><div class="guide-content"><p>Safari on Mac: File → Add to Dock. Chrome / Edge: Install app in the browser menu.</p><p>Wait for “Ready offline” before disconnecting. Use Save all to keep backups: clearing browser data can remove your structures.</p></div></dialog>
+</body></html>

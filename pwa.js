@@ -34,7 +34,7 @@
     const reloadWhenIdle = () => {
       if (Date.now() - lastInteraction < 1500 || document.querySelector('dialog[open]')) { reloadTimer = setTimeout(reloadWhenIdle, 500); return; }
       const ready = window.dispatchEvent(new Event('structogram-before-update', { cancelable: true }));
-      if (!ready) { status.textContent = 'Update ready · Save source, then refresh to update'; return; }
+      if (!ready) { status.textContent = 'Update ready · Apply pending edits and save your work before refreshing'; return; }
       reloading = true;
       location.reload();
     };

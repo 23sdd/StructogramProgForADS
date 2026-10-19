@@ -1124,3 +1124,7 @@ body {
   .editor-workspace[data-expanded="structogram"] .preview-viewport { min-height:0;max-height:none;flex:1; }
 }
 @media print { #panel-divider,.panel-expand { display:none!important; } }
+
+.ds-entry { margin:0 0 22px;text-decoration:none; }
+.ds-entry-mobile { display:none;text-decoration:none; }
+@media(max-width:860px){.ds-entry-mobile{display:inline-flex}.topbar{flex-wrap:wrap;height:auto;min-height:62px;padding-block:10px;gap:10px}.top-actions{flex-wrap:wrap}}
