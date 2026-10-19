@@ -1039,7 +1039,17 @@ document.addEventListener('keydown', event => {
   if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') { event.preventDefault(); saveSource(); }
 });
 window.addEventListener('beforeprint', updatePreview);
-window.addEventListener('pagehide', persist);
+function saveBeforeUpdate() {
+  // Commit an actively edited Blockly field before serializing its workspace.
+  if (document.activeElement?.classList.contains('blocklyHtmlInput')) document.activeElement.blur();
+  if (editorMode === 'blocks') visual?.flush();
+  persist();
+  return storageAvailable;
+}
+window.addEventListener('structogram-before-update', event => {
+  if (!saveBeforeUpdate()) event.preventDefault();
+});
+window.addEventListener('pagehide', saveBeforeUpdate);
 
 source.value = documentState.source;
 title.value = documentState.title;
