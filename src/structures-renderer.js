@@ -1,6 +1,6 @@
 import { structureType, analyseStructure, graphRepresentations, hashBuckets } from './structures-model.js';
 export function escapeStructure(value){return String(value).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));}
-export function renderStructure(doc){
+export function renderStructure(doc,{runtimeBalances=false}={}){
   const type=structureType(doc.kind),{metrics}=analyseStructure(doc),parts=[];
   let width=900,height=280;
   const text=(x,y,value,size=16)=>`<text x="${x}" y="${y}" font-size="${size}" text-anchor="middle">${escapeStructure(value)}</text>`;
@@ -32,7 +32,7 @@ export function renderStructure(doc){
         const logical=doc.kind==='queue'?(i-doc.start+doc.capacity)%doc.capacity:i;
         const value=logical<values.length?values[logical]:'·';
         const x=doc.kind==='stack'?140:80+i*78,y=doc.kind==='stack'?65+(count-1-i)*55:110;
-        parts.push(box(x,y,70,48,value),text(x+35,y-8,i,12));
+        parts.push(box(x,y,70,48,value).replace('<rect ','<rect data-array-index="'+i+'" '),text(x+35,y-8,i,12));
         if(doc.kind==='stack'&&i===values.length-1)parts.push(text(x+140,y+30,'← top',14));
         if(doc.kind==='queue'&&i===doc.start)parts.push(text(x+35,y+75,'↑ k',13));
       }
@@ -64,9 +64,9 @@ export function renderStructure(doc){
     }
     for(const n of doc.nodes){const p=positions.get(n.id);
       if(doc.kind==='bplus'){const w=Math.max(90,n.keys.length*35);parts.push(box(p.x-w/2,p.y-24,w,48,n.keys.join(' | ')||'∅'));}
-      else parts.push(`<circle cx="${p.x}" cy="${p.y}" r="26" fill="white" stroke="#263b32"/>`,text(p.x,p.y+6,n.key));
+      else parts.push(`<circle data-node-id="${escapeStructure(n.id)}" cx="${p.x}" cy="${p.y}" r="26" fill="white" stroke="#263b32"/>`,text(p.x,p.y+6,n.key));
       parts.push(text(p.x,p.y-38,n.id===doc.root?`${n.id} ← ${doc.name}`:n.id,12));
-      if(doc.kind==='avl'&&(n.left||n.right)){const b=metrics[n.id]?.balance??0;parts.push(text(p.x+43,p.y+5,b===0?'◦':b===1?'+':b===-1?'−':b===2?'++':b===-2?'−−':b,15));}
+      if(doc.kind==='avl'&&(n.left||n.right)){const b=runtimeBalances?(n.b??0):(metrics[n.id]?.balance??0);parts.push(text(p.x+43,p.y+5,b===0?'◦':b===1?'+':b===-1?'−':b===2?'++':b===-2?'−−':b,15));}
     }
     if(!doc.nodes.length)parts.push(text(250,130,`${doc.name} = ∅`));
   }else{
@@ -98,7 +98,7 @@ export function structureNotation(doc){
   }else if(type.family==='hash'){
     out.push(`T[0..${doc.capacity}) · m = ${doc.capacity} · n = ${doc.values.length}`,doc.kind==='direct'?'T[k] stores key k':`h(k) = ((k mod m) + m) mod m${doc.kind==='open'?'; linear probing h(k,i) = (h(k) + i) mod m':''}`);
     hashBuckets(doc).forEach((b,i)=>out.push(`T[${i}] = ${b.length?b.join(' → ')+(doc.kind==='chain'?' → ∅':''):doc.kind==='open'?'E':'∅'}`));
-    if(doc.kind==='open')out.push('E = empty. Editing the value list rebuilds the table; in-place deletion/tombstone D operations belong to the later execution stage.');
+    if(doc.kind==='open')out.push('E = empty. Editing the value list rebuilds the table; this editor rebuilds layouts rather than performing in-place D-marker deletion.');
   }else{
     const stored=doc.kind==='queue'?Array.from({length:doc.capacity},(_,i)=>{const logical=(i-doc.start+doc.capacity)%doc.capacity;return logical<doc.values.length?JSON.stringify(doc.values[logical]):'·';}):doc.values.map(v=>JSON.stringify(v));
     out.push(`${doc.kind==='queue'?'Z':'A'} = [${stored.join(', ')}]`, `n = ${doc.values.length}`);

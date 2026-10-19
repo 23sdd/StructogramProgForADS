@@ -97,6 +97,7 @@ export function createBlockEditor(element, onChange) {
       if (lastError) onChange({ error: lastError, state: save() });
     },
     save,
+    highlightLine(line) { workspace.highlightBlock(line ? lineMap[line] || null : null); },
     flush: publish,
     resize() { B.svgResize(workspace); },
     undo(redo = false) { workspace.undo(redo); publish(); },

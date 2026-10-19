@@ -5,7 +5,7 @@ A browser editor for the structure diagrams used in the ELTE Algorithms and Data
 - **Blocks:** drag Statement, If, While, For, and Selection blocks into an Algorithm block. Write operators and conditions directly in their fields. Nest blocks by connecting them inside a body or branch.
 - **Text:** write indented pseudocode. Switching to Blocks preserves the algorithm; changing a visual block updates both the text and the lecture-style diagram.
 
-The diagram follows the uploaded course PDFs: rounded routine signatures, loop rails, thin monochrome borders, diagonal selection marks, and `SKIP` for an empty branch. Pseudocode is treated as text and structure; it is never executed.
+The diagram follows the uploaded course PDFs: rounded routine signatures, loop rails, thin monochrome borders, diagonal selection marks, and `SKIP` for an empty branch. The editor draws pseudocode and can execute its supported subset in a bounded interpreter for step-by-step visualization. It never evaluates user text as JavaScript.
 
 ![Visual blocks and the lecture-style diagram](docs/editor-preview.png)
 
@@ -44,7 +44,7 @@ Use the ⛶ button in either panel header to expand that panel across the browse
 
 ## Create data structures
 
-Open **Data structures** from the algorithm editor, or use `structures.html`. The independent workspace creates, edits and stores up to 30 structures, with up to 64 values/nodes each. Algorithm execution and binding these structures to routines are a later stage.
+Open **Data structures** from the algorithm editor, or use `structures.html`. The independent workspace creates, edits and stores up to 30 structures, with up to 64 values/nodes each. Use Run with algorithm to bind these saved structures to a routine and execute a working copy.
 
 The catalogue follows the supplied course materials:
 
@@ -64,6 +64,28 @@ Choose a type, name and initial values. Numbers can be comma/space separated; us
 
 ![The structure editor](docs/structures-preview.png)
 
+## Execute and visualize your written algorithm
+
+1. Write pseudocode or choose a course example. Text and visual blocks use the same source.
+2. Create and apply your input data in **Data structures**. For BFS, create a graph/digraph, add vertices and edges, then choose **Run with algorithm**. The current algorithm remains saved when moving between pages.
+3. In **Run / Step**, choose the entry routine and bind each parameter to a compatible saved structure or scalar. A vertex parameter such as `s : V` selects an actual vertex from the bound graph.
+4. Use **Next step**, **Back**, **Run / Resume**, **Pause**, speed selection and **Reset**. Code and structogram tabs highlight the executed source line. Runtime diagrams highlight accessed nodes/array indices and the current graph edge. The queue, variables, call stack and `process`/`write` output update with each event.
+
+BFS executes the actual `G.V`, `G.A(u)`, `d(v)`, `π(v)` and queue statements in the editor; there is no canned BFS trace. Changing its condition or distance formula changes execution. Declared scalar/pointer variables, local array cells and vertex attributes start uninitialized (`—`), and reading one before writing it is an error. Unreachable distances remain `∞` after the algorithm initializes them. Graph neighbour iteration uses ascending vertex indices for deterministic results. Colours distinguish accessed, discovered and completed-adjacency states; the distance/predecessor table shows the actual values.
+
+All inputs are **working copies**. Runtime mutations and Reset never write over the saved structure collection. Back replays stored snapshots; resuming replays forward to the current execution before computing more steps. The last 500 snapshots are retained in memory. Closing the runner pauses execution; reopening starts a fresh session from the saved source and selected inputs. Apply data-editor drafts before returning to the runner.
+
+The initial interpreter supports the shipped BFS, insertion sort, BST search/insertion, recursive binary traversals and AVL balance calculation examples. It implements:
+
+- Typed signatures and parameter binding, scalar/reference parameters (`&t`), array-length parameters (`A : T[n]`), local scalar/array/Queue/Stack/PrQueue declarations.
+- `:=`, `++`/`--`, `if`/`else`, selections, collection loops, inclusive `to`/`downto` ranges, `while`, `SKIP`, comments, return and recursive calls.
+- Arithmetic/comparisons, short-circuit logical operators, indexed arrays/sequences, supported pointer fields, `∅`, `∞`, basic numeric functions, `swap`, `process` and `write`.
+- Graph vertices/neighbours and vertex attributes; Queue add/rem/first, Stack push/pop/top, priority-queue add/remMax/max, empty/full/length/setEmpty operations; bounded `new Node(key)` for a bound tree.
+
+This is a defined subset of the course notation, not a compiler for every mathematical expression. Slices, arbitrary libraries, file/network operations, general object construction, built-in B+/hash-table algorithms, cross-structure pointer writes and set algebra are not implemented. Nested containers are rejected; array and queue cells accept scalars or node references. Unsupported commands and invalid operations stop at their source line. Bounds errors, null dereferences, uninitialized vertex attributes, queue/stack overflow/underflow, step exhaustion and excessive recursion are reported rather than freezing the page. Limits include 10,000 steps by default, 64 call frames, 128 runtime nodes, 256 local array/queue cells and 1,000 output items. Execution runs incrementally between UI events and uses no `eval`, `Function`, generated JavaScript or system commands. Open execution dialogs defer automatic app-update reloads.
+
+![BFS executing on a saved graph](docs/execution-preview.png)
+
 ## Source notation
 
 ```text
@@ -76,7 +98,7 @@ search(t : Node*; k : T) : Node*
   return t
 ```
 
-Use consistent indentation within each block (two spaces recommended). No closing `end` keywords are needed. Empty bodies require `SKIP` in Text mode; an omitted `else` becomes an implicit `SKIP`. Conditions are not evaluated and the algorithm's mathematical correctness is not checked.
+Use consistent indentation within each block (two spaces recommended). No closing `end` keywords are needed. Empty bodies require `SKIP` in Text mode; an omitted `else` becomes an implicit `SKIP`. The drawing accepts expressions as text; Run / Step interprets supported expressions. A trace can expose behavior and runtime errors, but does not prove mathematical correctness.
 
 The preview converts `->`, `!=`, `<>`, `<=`, `>=`, `&&`, `||`, `!`, and `NULL`/`null` into the course's mathematical symbols. It preserves `:=` for assignment and `=` for equality. Source files retain the text as typed until a visual edit regenerates the document. Comments beginning with `//` remain literal text.
 

@@ -1,3 +1,4 @@
+import { initExecutionUI } from './execution-ui.js';
 import { initWorkspaceLayout } from './layout.js';
 import { parse } from './parser.js';
 import { render } from './renderer.js';
@@ -457,4 +458,18 @@ if (!storageAvailable) $('save-status').textContent = 'Use Save source to keep y
 initWorkspaceLayout(() => {
   if (editorMode === 'blocks') visual?.resize();
   if (fitMode) applyZoom();
+});
+
+initExecutionUI({
+  getSource() {
+    if (document.activeElement?.classList.contains('blocklyHtmlInput')) document.activeElement.blur();
+    if (editorMode === 'blocks') visual?.flush();
+    if (visual?.error && editorMode === 'blocks') throw visual.error;
+    persist(); updatePreview();
+    return source.value;
+  },
+  highlight(line) {
+    stage.querySelectorAll('[data-line]').forEach(row => row.classList.toggle('execution-current', Number(row.dataset.line) === line));
+    visual?.highlightLine(line);
+  }
 });
