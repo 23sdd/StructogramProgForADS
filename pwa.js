@@ -21,9 +21,27 @@
     status.textContent = 'Offline access requires HTTPS or localhost';
     return;
   }
-  let prepared = false, waiting = false;
+  let prepared = false, updating = false, reloadTimer, reloading = false;
+  let lastInteraction = Date.now();
+  for (const type of ['input', 'keydown', 'pointerdown', 'pointermove']) document.addEventListener(type, () => { lastInteraction = Date.now(); }, { passive: true });
+  const version = document.querySelector('meta[name="app-version"]')?.content;
+  navigator.serviceWorker.addEventListener('message', event => {
+    if (event.data?.type !== 'STRUCTOGRAM_UPDATE') return;
+    event.ports[0]?.postMessage({ handled: true });
+    if (event.data.version === version || reloading) return;
+    updating = true;
+    showStatus();
+    const reloadWhenIdle = () => {
+      if (Date.now() - lastInteraction < 1500 || document.querySelector('dialog[open]')) { reloadTimer = setTimeout(reloadWhenIdle, 500); return; }
+      const ready = window.dispatchEvent(new Event('structogram-before-update', { cancelable: true }));
+      if (!ready) { status.textContent = 'Update ready · Save source, then refresh to update'; return; }
+      reloading = true;
+      location.reload();
+    };
+    clearTimeout(reloadTimer); reloadTimer = setTimeout(reloadWhenIdle, 1500);
+  });
   const showStatus = () => {
-    status.textContent = waiting ? 'Update ready — close all app tabs and reopen' :
+    status.textContent = updating ? 'Updating automatically · Your work is saved' :
       prepared ? (navigator.onLine ? 'Ready offline · Save source for backups' : 'Offline · Your edits stay on this device') :
       'Preparing offline access…';
   };
@@ -33,15 +51,19 @@
     const watch = worker => {
       if (!worker) return;
       worker.addEventListener('statechange', () => {
-        waiting = Boolean(registration.waiting);
+        updating = Boolean(registration.waiting);
         if (worker.state === 'redundant' && !prepared) status.textContent = 'Offline setup failed — reopen online to retry';
         else showStatus();
       });
     };
-    waiting = Boolean(registration.waiting);
+    updating = Boolean(registration.waiting);
     watch(registration.installing);
     registration.addEventListener('updatefound', () => watch(registration.installing));
     showStatus();
+    const check = () => registration.update().catch(() => {});
+    check();
+    window.addEventListener('online', check);
+    document.addEventListener('visibilitychange', () => { if (!document.hidden) check(); });
     return navigator.serviceWorker.ready;
   }).then(() => { prepared = true; showStatus(); }).catch(() => {
     status.textContent = 'Offline access unavailable · Save source to keep your work';

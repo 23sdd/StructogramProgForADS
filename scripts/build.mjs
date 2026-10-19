@@ -35,6 +35,10 @@ const assets = await filesIn(output);
 const hash = createHash('sha256');
 for (const name of assets) { hash.update(name); hash.update(await readFile(new URL(name, output))); }
 const template = await readFile(new URL('scripts/service-worker-template.js', root), 'utf8');
-await writeFile(new URL('sw.js', output), template.replace('__VERSION__', hash.digest('hex').slice(0, 20)).replace('__ASSETS__', JSON.stringify(assets.map(name => './' + name))));
+hash.update(template);
+const revision = hash.digest('hex').slice(0, 20);
+const html = await readFile(new URL('index.html', output), 'utf8');
+await writeFile(new URL('index.html', output), html.replace('<title>', `<meta name="app-version" content="${revision}"><title>`).replace(/((?:src|href)="\.\/[^"]+\.(?:js|css))"/g, `$1?v=${revision}"`));
+await writeFile(new URL('sw.js', output), template.replace('__VERSION__', revision).replace('__ASSETS__', JSON.stringify(assets.map(name => './' + name))));
 await writeFile(new URL('.nojekyll', output), '');
 console.log('Built the browser editor with local Blockly assets and offline cache in dist/');

@@ -22,7 +22,7 @@ Open the editor online once and wait for **Ready offline**. After adding it to t
 
 To transfer a document from the previous desktop app, save its `.ads` source there, then select **Open file** here. Existing desktop data is not automatically accessible to a website. Clearing browser data removes local documents and offline files; it does not delete downloaded `.ads` backups.
 
-New versions download in the background when online. Existing tabs keep their version to avoid disrupting edits. When “Update ready” appears, save a backup, close all editor tabs/windows, then reopen. Browser-local storage is preserved during app updates.
+With internet available, opening the usual URL requests the published files instead of retaining an old offline copy. New service workers activate automatically. Before a background update reloads a current editor, it waits for an idle moment, commits the active block field, and saves the document. If storage is unavailable it leaves the editor open and asks you to save a source backup first. Existing tabs do not have to be closed. The previous cache-first version migrates automatically through a normal navigation that triggers its existing document save. Offline reopening still uses the installed snapshot.
 
 ## Use the two editing modes
 
@@ -83,7 +83,7 @@ npm test
 npm start
 ```
 
-`npm start` serves `dist/` at localhost:4173. Edit modules in `src/`, rebuild, and commit the generated `app.bundle.js`. All deployed dependencies are local. `scripts/build.mjs` generates a content-versioned service worker that precaches the complete app. It uses relative paths for GitHub project Pages and keeps old tabs on a consistent version until closed.
+`npm start` serves `dist/` at localhost:4173. Edit modules in `src/`, rebuild, and commit the generated `app.bundle.js`. All deployed dependencies are local. `scripts/build.mjs` generates a content-versioned service worker that precaches the complete app. It uses relative paths for GitHub project Pages and checks online resources first and retains an offline snapshot.
 
 Tests cover Blockly round trips, field editing, nested branches, malformed text, escaped SVG, and offline cache isolation/lifecycle. Browser QA covers actual editing, downloads, CSP, and an offline reload. GitHub Actions runs the automated tests before publishing the built `dist/` on pushes to `main`. PR builds do not publish or run a Mac installer.
 
